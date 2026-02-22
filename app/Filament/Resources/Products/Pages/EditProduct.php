@@ -54,17 +54,34 @@ class EditProduct extends EditRecord
 
     /**
      * ✅ Перед save продукту: вирізаємо translation-поля, зберігаємо їх окремо.
+     * ✅ UUID: якщо перемикач увімкнено і uuid пустий — генеруємо.
+     * ✅ Якщо перемикач вимкнено і uuid пустий — НЕ чіпаємо поле (не перезаписуємо в NULL).
      */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // страховка: uppercase article_raw
+        // ✅ uppercase article_raw (але пробіли не ріжемо)
         if (isset($data['article_raw'])) {
-            $data['article_raw'] = mb_strtoupper(trim((string) $data['article_raw']), 'UTF-8');
+            $data['article_raw'] = mb_strtoupper((string) $data['article_raw'], 'UTF-8');
+        }
+
+        // ✅ UUID toggle
+        $uuidAuto = (bool) ($data['uuid_auto'] ?? false);
+        unset($data['uuid_auto']);
+
+        $uuid = trim((string) ($data['uuid'] ?? ''));
+        if ($uuid === '') {
+            if ($uuidAuto) {
+                $data['uuid'] = (string) Str::uuid();
+            } else {
+                // ✅ дуже важливо: не перезаписуємо uuid в NULL
+                unset($data['uuid']);
+            }
+        } else {
+            $data['uuid'] = $uuid;
         }
 
         [$data, $translations] = $this->extractTranslations($data);
 
-        // після збереження продукту нам потрібні актуальні article_norm і manufacturer_id
         $this->saveTranslationsAfterSave = $translations;
 
         return $data;
@@ -125,7 +142,6 @@ class EditProduct extends EditRecord
                 || !empty($t['meta_title'])
                 || !empty($t['meta_description']);
 
-            // якщо взагалі нічого не задано — не чіпаємо (не створюємо пусті)
             if (! $hasAny) {
                 continue;
             }

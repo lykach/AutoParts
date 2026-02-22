@@ -63,11 +63,16 @@ class ProductForm
                                         ->maxLength(128)
                                         ->live()
                                         ->afterStateUpdated(function ($state, callable $set) {
-                                            $raw = mb_strtoupper(trim((string) $state), 'UTF-8');
-                                            $set('article_raw', $raw);
-                                            $set('article_norm', Product::normalizeArticle($raw));
+                                            // ✅ пробіли зберігаємо, але робимо uppercase прямо в полі
+                                            $upper = mb_strtoupper((string) $state, 'UTF-8');
+
+                                            // повертаємо значення назад у поле
+                                            $set('article_raw', $upper);
+
+                                            // генеруємо очищений артикул для пошуку
+                                            $set('article_norm', Product::normalizeArticle($upper));
                                         })
-                                        ->helperText('Вводь як у прайсі/на коробці. Автоматично буде у верхньому регістрі.'),
+                                        ->helperText('Пробіли зберігаються. Для пошуку використовується "очищений" артикул.'),
 
                                     TextInput::make('article_norm')
                                         ->label('Артикул (очищений для пошуку)')
@@ -89,7 +94,6 @@ class ProductForm
                             Section::make('RU')->schema(self::translationFields('ru'))->columns(2),
                         ]),
 
-                    // ✅ Нова вкладка
                     Tab::make('Доставка / Габарити')
                         ->schema([
                             Section::make('Дані для перевізників (Нова Пошта тощо)')
@@ -119,6 +123,30 @@ class ProductForm
                                         ->numeric()
                                         ->minValue(0)
                                         ->step(0.1),
+                                ])
+                                ->columns(2),
+                        ]),
+
+                    Tab::make('UUID')
+                        ->schema([
+                            Section::make('UUID товару')
+                                ->description('Можна задати вручну. Або увімкни перемикач — тоді UUID буде згенеровано при збереженні, якщо поле пусте.')
+                                ->schema([
+                                    Toggle::make('uuid_auto')
+                                        ->label('Згенерувати UUID автоматично')
+                                        ->default(false)
+                                        ->dehydrated(false)
+                                        ->helperText('Якщо увімкнено і UUID порожній — згенерується при збереженні.'),
+
+                                    TextInput::make('uuid')
+                                        ->label('UUID')
+                                        ->placeholder('Напр. 550e8400-e29b-41d4-a716-446655440000')
+                                        ->maxLength(36)
+                                        ->helperText('Якщо перемикач вимкнено і поле пусте — UUID буде пропущено (NULL).')
+                                        ->rules([
+                                            'nullable',
+                                            'uuid',
+                                        ]),
                                 ])
                                 ->columns(2),
                         ]),

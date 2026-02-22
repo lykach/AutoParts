@@ -17,9 +17,25 @@ class CreateProduct extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // ✅ страховка: uppercase article_raw ще до збереження (хоч і в моделі теж буде)
+        // ✅ uppercase article_raw (але пробіли не ріжемо)
         if (isset($data['article_raw'])) {
-            $data['article_raw'] = mb_strtoupper(trim((string) $data['article_raw']), 'UTF-8');
+            $data['article_raw'] = mb_strtoupper((string) $data['article_raw'], 'UTF-8');
+        }
+
+        // ✅ UUID: якщо uuid_auto=1 і uuid порожній — генеруємо
+        $uuidAuto = (bool) ($data['uuid_auto'] ?? false);
+        unset($data['uuid_auto']); // цього поля в БД нема
+
+        $uuid = trim((string) ($data['uuid'] ?? ''));
+        if ($uuid === '') {
+            if ($uuidAuto) {
+                $data['uuid'] = (string) Str::uuid();
+            } else {
+                // ✅ не пишемо в БД нічого (на create буде NULL)
+                unset($data['uuid']);
+            }
+        } else {
+            $data['uuid'] = $uuid;
         }
 
         [$data, $translations] = $this->extractTranslations($data);
@@ -83,7 +99,6 @@ class CreateProduct extends CreateRecord
                 continue;
             }
 
-            // ✅ якщо slug пустий — ставимо дефолтний (brand+article)
             $slug = trim((string) ($t['slug'] ?? ''));
             if ($slug === '') {
                 $slug = $defaultSlug;
@@ -91,7 +106,6 @@ class CreateProduct extends CreateRecord
                 $slug = Str::slug($slug);
             }
 
-            // ✅ унікальність slug в межах locale
             $slug = $this->makeUniqueSlug($slug, $locale, $product->id);
 
             ProductTranslation::updateOrCreate(
@@ -114,7 +128,6 @@ class CreateProduct extends CreateRecord
         $base = $slug;
         $candidate = $base;
 
-        // якщо вже зайнятий іншим товаром у цій мові — додаємо -{productId}
         $exists = ProductTranslation::query()
             ->where('locale', $locale)
             ->where('slug', $candidate)
@@ -125,8 +138,6 @@ class CreateProduct extends CreateRecord
             return $candidate;
         }
 
-        $candidate = $base . '-' . $productId;
-
-        return $candidate;
+        return $base . '-' . $productId;
     }
 }

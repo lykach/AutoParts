@@ -30,6 +30,9 @@ class Product extends Model
 
         'tecdoc_id',
 
+        // ✅ UUID (nullable, задаємо вручну або через перемикач у формі)
+        'uuid',
+
         // ✅ Доставка / габарити
         'weight_kg',
         'length_cm',
@@ -52,6 +55,8 @@ class Product extends Model
 
         'created_by' => 'integer',
         'tecdoc_id' => 'integer',
+
+        'uuid' => 'string',
 
         // ✅ Доставка / габарити
         'weight_kg' => 'decimal:3',
@@ -218,8 +223,9 @@ class Product extends Model
     protected static function booted(): void
     {
         static::saving(function (self $p) {
+            // ✅ article_raw: пробіли не чіпаємо, тільки uppercase
             if ($p->article_raw !== null) {
-                $p->article_raw = mb_strtoupper(trim((string) $p->article_raw), 'UTF-8');
+                $p->article_raw = mb_strtoupper((string) $p->article_raw, 'UTF-8');
             }
 
             if (!empty($p->article_raw) && (empty($p->article_norm) || $p->isDirty('article_raw'))) {
@@ -250,6 +256,8 @@ class Product extends Model
                     ]);
                 }
             }
+
+            // ✅ UUID тут НЕ генеруємо (тільки вручну/через перемикач у формі)
         });
     }
 
