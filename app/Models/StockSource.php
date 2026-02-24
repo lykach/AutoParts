@@ -17,9 +17,6 @@ class StockSource extends Model
         'is_active',
         'sort_order',
 
-        'min_order_default_qty',
-
-        // ✅ NEW
         'default_currency_code',
 
         'contact_name',
@@ -43,9 +40,6 @@ class StockSource extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'sort_order' => 'integer',
-        'min_order_default_qty' => 'integer',
-
-        // ✅ NEW
         'default_currency_code' => 'string',
 
         'lat' => 'decimal:7',
@@ -80,6 +74,13 @@ class StockSource extends Model
             ->withTimestamps();
     }
 
+    public function locations(): HasMany
+    {
+        return $this->hasMany(StockSourceLocation::class, 'stock_source_id')
+            ->orderBy('sort_order')
+            ->orderBy('name');
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(StockItem::class, 'stock_source_id');
@@ -105,20 +106,36 @@ class StockSource extends Model
 
             $s->type = trim((string) $s->type);
 
-            if ($s->sort_order === null) {
-                $s->sort_order = 100;
-            }
-
-            // ✅ валюта за замовчуванням
+            // ✅ Валюта за замовчуванням
             $s->default_currency_code = $s->default_currency_code
                 ? Str::upper(trim((string) $s->default_currency_code))
                 : 'UAH';
+
+            /**
+             * ✅ Авто sort_order:
+             * - якщо створення і sort_order не заданий → max + 100
+             * - якщо редагування і стерли → залишаємо попередній
+             */
+            if ($s->sort_order === null) {
+                if ($s->exists) {
+                    $s->sort_order = (int) ($s->getOriginal('sort_order') ?? 100);
+                } else {
+                    $max = self::query()->max('sort_order');
+                    $s->sort_order = (int) (($max ?? 0) + 100);
+                }
+            }
         });
 
         static::deleting(function (self $s) {
             if ($s->storeLinks()->exists()) {
                 throw ValidationException::withMessages([
                     'stock_source' => 'Неможливо видалити: джерело використовується в магазинах (є привʼязки).',
+                ]);
+            }
+
+            if ($s->locations()->exists()) {
+                throw ValidationException::withMessages([
+                    'stock_source' => 'Неможливо видалити: у джерела є склади/локації.',
                 ]);
             }
 

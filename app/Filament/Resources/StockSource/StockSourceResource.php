@@ -5,6 +5,7 @@ namespace App\Filament\Resources\StockSource;
 use App\Filament\Resources\StockSource\Pages\CreateStockSource;
 use App\Filament\Resources\StockSource\Pages\EditStockSource;
 use App\Filament\Resources\StockSource\Pages\ListStockSources;
+use App\Filament\Resources\StockSource\RelationManagers\LocationsRelationManager;
 use App\Filament\Resources\StockSource\Schemas\StockSourceForm;
 use App\Filament\Resources\StockSource\Tables\StockSourceTable;
 use App\Models\StockSource;
@@ -20,10 +21,6 @@ class StockSourceResource extends Resource
     protected static ?string $pluralModelLabel = 'джерела';
     protected static ?string $recordTitleAttribute = 'name';
 
-    /**
-     * ✅ Важливо: типи мають 1-в-1 збігатися з твоїм Filament vendor.
-     * Судячи з помилки: Resource::getNavigationLabel(): string (НЕ nullable).
-     */
     public static function getNavigationLabel(): string
     {
         return 'Склади / Постачальники';
@@ -47,6 +44,17 @@ class StockSourceResource extends Resource
     public static function table(Table $table): Table
     {
         return StockSourceTable::configure($table);
+    }
+
+    /**
+     * ✅ Filament v5: relations повертаємо як масив КЛАСІВ.
+     * Це дає вкладку “Склади постачальника” в Edit сторінці.
+     */
+    public static function getRelations(): array
+    {
+        return [
+            LocationsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

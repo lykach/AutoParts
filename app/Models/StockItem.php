@@ -3,20 +3,22 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class StockItem extends Model
 {
     protected $fillable = [
         'stock_source_id',
+        'stock_source_location_id',
         'product_id',
 
         'qty',
         'reserved_qty',
 
-        'pack_qty',
-        'availability_status',
+        // ✅ renamed
+        'multiplicity',
 
-        'min_order_qty',
+        'availability_status',
 
         'price_purchase',
         'price_sell',
@@ -31,15 +33,14 @@ class StockItem extends Model
 
     protected $casts = [
         'stock_source_id' => 'integer',
+        'stock_source_location_id' => 'integer',
         'product_id' => 'integer',
 
         'qty' => 'decimal:3',
         'reserved_qty' => 'decimal:3',
 
-        'pack_qty' => 'integer',
+        'multiplicity' => 'integer',
         'availability_status' => 'string',
-
-        'min_order_qty' => 'integer',
 
         'price_purchase' => 'decimal:2',
         'price_sell' => 'decimal:2',
@@ -52,14 +53,19 @@ class StockItem extends Model
         'meta' => 'array',
     ];
 
-    public function product()
+    public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
     }
 
-    public function source()
+    public function source(): BelongsTo
     {
         return $this->belongsTo(StockSource::class, 'stock_source_id');
+    }
+
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(StockSourceLocation::class, 'stock_source_location_id');
     }
 
     public static function availabilityOptions(): array
@@ -84,16 +90,16 @@ class StockItem extends Model
     public function getAvailableForSaleQtyAttribute(): float
     {
         $available = $this->available_qty;
-        $pack = (int) ($this->pack_qty ?? 1);
+        $m = (int) ($this->multiplicity ?? 1);
 
-        if ($pack <= 1) {
+        if ($m <= 1) {
             return $available;
         }
 
         $eps = 0.00001;
-        $packsCount = (int) floor(($available + $eps) / $pack);
+        $packsCount = (int) floor(($available + $eps) / $m);
 
-        return max(0, $packsCount * $pack);
+        return max(0, $packsCount * $m);
     }
 
     // -------------------------

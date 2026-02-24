@@ -42,7 +42,9 @@ class StockSourceForm
                                                 TextInput::make('sort_order')
                                                     ->label('Сортування')
                                                     ->numeric()
-                                                    ->default(100),
+                                                    ->placeholder('Авто')
+                                                    ->helperText('Якщо пусто — встановиться автоматично')
+                                                    ->dehydrateStateUsing(fn ($state) => filled($state) ? (int) $state : null),
 
                                                 TextInput::make('name')
                                                     ->label('Назва')
@@ -63,13 +65,6 @@ class StockSourceForm
                                                     ->options(StockSource::typeOptions())
                                                     ->native(false),
 
-                                                TextInput::make('min_order_default_qty')
-                                                    ->label('Мін. замовлення (шт, дефолт)')
-                                                    ->numeric()
-                                                    ->minValue(1)
-                                                    ->placeholder('—'),
-
-                                                // ✅ NEW
                                                 Select::make('default_currency_code')
                                                     ->label('Валюта за замовчуванням')
                                                     ->required()
@@ -89,7 +84,10 @@ class StockSourceForm
                                             ->columns(['default' => 1, 'md' => 2])
                                             ->schema([
                                                 TextInput::make('contact_name')->label('Контакт')->maxLength(255),
+
+                                                // ✅ як у UserForm — тільки через компонент
                                                 PhoneInput::make('phone')->label('Телефон'),
+
                                                 TextInput::make('email')->label('Email')->email()->maxLength(255),
                                                 TextInput::make('website_url')->label('Сайт')->url()->maxLength(255),
                                             ]),

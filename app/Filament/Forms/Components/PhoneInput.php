@@ -18,7 +18,23 @@ class PhoneInput extends TextInput
             ->placeholder('+38 (0__) ___-__-__')
             ->default('+38 (0')
             ->stripCharacters([' ', '(', ')', '-'])
-            ->rules([new UkrainianPhone()])
+
+            /**
+             * ✅ КЛЮЧ: валідовати ТІЛЬКИ коли поле реально заповнили
+             * (а не коли там просто дефолт "+38 (0")
+             */
+            ->rule(function ($state) {
+                if (empty($state) || $state === '+38 (0' || $state === '+38 (0)') {
+                    return 'nullable';
+                }
+
+                return [new UkrainianPhone()];
+            })
+
+            /**
+             * ✅ Якщо не ввели — зберігаємо NULL.
+             * Якщо ввели — нормалізуємо.
+             */
             ->dehydrateStateUsing(function ($state) {
                 if (empty($state) || $state === '+38 (0' || $state === '+38 (0)') {
                     return null;
@@ -26,6 +42,10 @@ class PhoneInput extends TextInput
 
                 return UkrainianPhone::normalize($state);
             })
+
+            /**
+             * ✅ Після завантаження: або дефолт маски, або форматований номер
+             */
             ->afterStateHydrated(function ($component, $state) {
                 if (empty($state)) {
                     $component->state('+38 (0');
@@ -33,6 +53,7 @@ class PhoneInput extends TextInput
                     $component->state(UkrainianPhone::format($state));
                 }
             })
+
             ->helperText('Формат: +38 (0XX) XXX-XX-XX');
     }
 }

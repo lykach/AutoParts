@@ -4,7 +4,7 @@ namespace App\Filament\Resources\Products\RelationManagers;
 
 use App\Models\Currency;
 use App\Models\StockItem;
-use App\Models\StockSource;
+use App\Models\StockSourceLocation;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -25,26 +25,44 @@ class StockItemsRelationManager extends RelationManager
     public function form(Schema $schema): Schema
     {
         return $schema->components([
-            Select::make('stock_source_id')
-                ->label('Джерело')
+            Select::make('stock_source_location_id')
+                ->label('Склад постачальника')
                 ->required()
                 ->searchable()
                 ->preload()
                 ->live()
-                ->options(fn () => StockSource::query()
+                ->options(fn () => StockSourceLocation::query()
+                    ->with('source')
                     ->orderBy('sort_order')
                     ->orderBy('name')
-                    ->pluck('name', 'id')
+                    ->get()
+                    ->mapWithKeys(fn ($l) => [$l->id => ($l->source?->name ? ($l->source->name . ' — ') : '') . $l->name])
                     ->all()
                 )
                 ->afterStateUpdated(function ($state, callable $set, callable $get) {
-                    // якщо валюта не вибрана — підставимо дефолт складу
-                    $current = $get('currency');
-                    if (!filled($current) && filled($state)) {
-                        $def = StockSource::query()->whereKey($state)->value('default_currency_code') ?: 'UAH';
+                    // ✅ якщо валюта не вибрана — підставимо дефолт валюти джерела
+                    $currentCur = $get('currency');
+                    if (!filled($currentCur) && filled($state)) {
+                        $def = StockSourceLocation::query()
+                            ->with('source:id,default_currency_code')
+                            ->whereKey($state)
+                            ->first()?->source?->default_currency_code ?: 'UAH';
+
                         $set('currency', $def);
                     }
+
+                    // ✅ автоматично проставимо stock_source_id для консистентності/швидких фільтрів
+                    if (filled($state)) {
+                        $sid = StockSourceLocation::query()->whereKey($state)->value('stock_source_id');
+                        if ($sid) $set('stock_source_id', (int) $sid);
+                    }
                 }),
+
+            // приховане поле, але зберігаємо в БД для швидких запитів
+            TextInput::make('stock_source_id')
+                ->dehydrated(true)
+                ->disabled()
+                ->hidden(),
 
             Select::make('availability_status')
                 ->label('Статус')
@@ -67,8 +85,8 @@ class StockItemsRelationManager extends RelationManager
                 ->minValue(0)
                 ->helperText('Зараз можна редагувати вручну. Пізніше буде автоматично з замовлень.'),
 
-            TextInput::make('pack_qty')
-                ->label('Кратність (pack)')
+            TextInput::make('multiplicity')
+                ->label('Кратність (multiplicity)')
                 ->numeric()
                 ->required()
                 ->default(1)
@@ -85,10 +103,7 @@ class StockItemsRelationManager extends RelationManager
                     ->pluck('code', 'code')
                     ->all()
                 )
-                ->default(function () {
-                    // дефолт для нової позиції — UAH (або підставиться після вибору складу)
-                    return 'UAH';
-                }),
+                ->default(fn () => 'UAH'),
 
             TextInput::make('price_purchase')
                 ->label('Закупка (в валюті)')
@@ -111,16 +126,10 @@ class StockItemsRelationManager extends RelationManager
                 ->formatStateUsing(fn ($state, $record) => $record ? $record->available_qty : null),
 
             TextInput::make('available_for_sale_qty')
-                ->label('Доступно до продажу (з pack)')
+                ->label('Доступно до продажу (з multiplicity)')
                 ->disabled()
                 ->dehydrated(false)
                 ->formatStateUsing(fn ($state, $record) => $record ? $record->available_for_sale_qty : null),
-
-            TextInput::make('min_order_qty')
-                ->label('Мін. замовлення (шт)')
-                ->numeric()
-                ->minValue(1)
-                ->placeholder('—'),
 
             TextInput::make('delivery_days_min')
                 ->label('Доставка від (днів)')
@@ -139,10 +148,16 @@ class StockItemsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query) => $query->with('source'))
+            ->modifyQueryUsing(fn (Builder $query) => $query->with(['location.source']))
             ->columns([
-                Tables\Columns\TextColumn::make('source.name')
-                    ->label('Джерело')
+                Tables\Columns\TextColumn::make('location.source.name')
+                    ->label('Постачальник')
+                    ->sortable()
+                    ->searchable()
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('location.name')
+                    ->label('Склад')
                     ->sortable()
                     ->searchable(),
 
@@ -169,8 +184,8 @@ class StockItemsRelationManager extends RelationManager
                     ->numeric()
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('pack_qty')
-                    ->label('Pack')
+                Tables\Columns\TextColumn::make('multiplicity')
+                    ->label('Multiplicity')
                     ->numeric()
                     ->sortable()
                     ->toggleable(),
