@@ -4,17 +4,23 @@ namespace App\Filament\Resources\StockSource\RelationManagers;
 
 use App\Models\StockSource;
 use App\Models\StockSourceLocation;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Collection;
 
 class LocationsRelationManager extends RelationManager
 {
@@ -46,8 +52,8 @@ class LocationsRelationManager extends RelationManager
                 ->label('Сортування')
                 ->numeric()
                 ->placeholder('Авто')
-                ->helperText('Якщо пусто — не змінюється (або авто для нового).')
-                // ✅ ключ: "" -> null (далі модель сама підставить правильне)
+                ->helperText('Якщо пусто — авто (для нового) або не змінюється (при редагуванні).')
+                // "" -> null (далі модель сама підставить)
                 ->dehydrateStateUsing(fn ($state) => filled($state) ? (int) $state : null),
 
             Forms\Components\TextInput::make('name')
@@ -92,8 +98,12 @@ class LocationsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            // ✅ щоб показувати items_count без N+1
+            ->modifyQueryUsing(fn (Builder $query) => $query->withCount('items'))
+
             ->reorderable('sort_order')
             ->defaultSort('sort_order', 'asc')
+
             ->columns([
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('Активно')
@@ -123,23 +133,102 @@ class LocationsRelationManager extends RelationManager
                     ->label('Місто')
                     ->toggleable(),
 
+                // ✅ як у категоріях: показуємо скільки товарів у складі
+                Tables\Columns\TextColumn::make('items_count')
+                    ->label('Товарів')
+                    ->counts('items')
+                    ->sortable()
+                    ->badge()
+                    ->color('success'),
+
                 Tables\Columns\TextColumn::make('updated_at')
                     ->label('Оновлено')
                     ->dateTime('d.m.Y H:i')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+
             ->headerActions([
                 CreateAction::make()->label('Додати склад'),
             ])
+
             ->actions([
                 EditAction::make(),
+
                 DeleteAction::make()
                     ->disabled(fn (StockSourceLocation $record) => $record->items()->exists())
                     ->tooltip(fn (StockSourceLocation $record) => $record->items()->exists()
                         ? 'Неможливо видалити: у складі є позиції (stock_items).'
                         : null
                     ),
+            ])
+
+            // ✅ чекбокси + "Відкрити дії" як у CategoriesTable
+            ->bulkActions([
+                BulkActionGroup::make([
+
+                    BulkAction::make('activateSelected')
+                        ->label('Зробити активними')
+                        ->icon('heroicon-o-check-circle')
+                        ->color('success')
+                        ->requiresConfirmation(false)
+                        ->action(function (Collection $records) {
+                            $count = 0;
+
+                            foreach ($records as $record) {
+                                if (! $record->is_active) {
+                                    $record->update(['is_active' => true]);
+                                    $count++;
+                                }
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title('Готово')
+                                ->body("Активовано: {$count}")
+                                ->send();
+                        }),
+
+                    BulkAction::make('deactivateSelected')
+                        ->label('Зробити неактивними')
+                        ->icon('heroicon-o-x-circle')
+                        ->color('gray')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records) {
+                            $count = 0;
+
+                            foreach ($records as $record) {
+                                if ($record->is_active) {
+                                    $record->update(['is_active' => false]);
+                                    $count++;
+                                }
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title('Готово')
+                                ->body("Деактивовано: {$count}")
+                                ->send();
+                        }),
+
+                    DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action) {
+                            foreach ($records as $record) {
+                                /** @var StockSourceLocation $record */
+                                if ($record->items()->exists()) {
+                                    Notification::make()
+                                        ->danger()
+                                        ->title('Склад має товари!')
+                                        ->body("Неможливо видалити '{$record->name}' — у ньому є позиції (stock_items).")
+                                        ->send();
+
+                                    $action->cancel();
+                                    return;
+                                }
+                            }
+                        }),
+
+                ])->label('Відкрити дії'),
             ]);
     }
 }
