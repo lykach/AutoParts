@@ -133,9 +133,6 @@ class Store extends Model
         return $this->belongsTo(\App\Models\Currency::class, 'currency_id');
     }
 
-    /**
-     * ✅ Pivot links (із priority/is_active/налаштуваннями)
-     */
     public function stockSourceLinks(): HasMany
     {
         return $this->hasMany(\App\Models\StoreStockSource::class, 'store_id')
@@ -143,15 +140,15 @@ class Store extends Model
             ->orderBy('id');
     }
 
-    /**
-     * ✅ Зручно для whereHas / sync / вибірок
-     */
     public function stockSources(): BelongsToMany
     {
         return $this->belongsToMany(\App\Models\StockSource::class, 'store_stock_sources', 'store_id', 'stock_source_id')
             ->withPivot([
                 'is_active',
                 'priority',
+                'markup_percent',
+                'min_delivery_days',
+                'max_delivery_days',
                 'lead_time_days',
                 'cutoff_time',
                 'pickup_available',
@@ -165,9 +162,6 @@ class Store extends Model
             ->withTimestamps();
     }
 
-    /**
-     * ✅ Швидкий доступ: активні джерела магазину (не resolved, а саме цього магазину)
-     */
     public function getActiveStockSourcesAttribute(): EloquentCollection
     {
         return $this->stockSources()
@@ -192,7 +186,7 @@ class Store extends Model
     }
 
     // ------------------------------------------------------------
-    // Resolved getters (з урахуванням спадкування)
+    // Resolved getters
     // ------------------------------------------------------------
     public function resolvedCountryId(): ?int
     {
@@ -206,7 +200,7 @@ class Store extends Model
 
     public function resolvedTimezone(): string
     {
-        return $this->resolveValue('timezone') ?: 'Europe/Uzhgorod';
+        return $this->resolveValue('timezone') ?: 'Europe/Kyiv';
     }
 
     public function resolvedDefaultLanguage(): string
@@ -214,38 +208,6 @@ class Store extends Model
         return $this->resolveValue('default_language') ?: 'uk';
     }
 
-    public function resolvedPaymentMethods(): ?array
-    {
-        return $this->resolveValue('payment_methods');
-    }
-
-    public function resolvedDeliveryMethods(): ?array
-    {
-        return $this->resolveValue('delivery_methods');
-    }
-
-    public function resolvedServices(): ?array
-    {
-        return $this->resolveValue('services');
-    }
-
-    public function resolvedPickupInstructions(string $locale = 'uk'): ?string
-    {
-        return $this->resolveValue('pickup_instructions_' . $locale);
-    }
-
-    public function resolvedDeliveryInfo(string $locale = 'uk'): ?string
-    {
-        return $this->resolveValue('delivery_info_' . $locale);
-    }
-
-    /**
-     * ✅ Resolved stock sources links:
-     * - main: свої
-     * - inherit_defaults=false: свої
-     * - overrides.stock_sources=true: свої
-     * - якщо своїх нема → беремо з parent рекурсивно
-     */
     public function resolvedStockSourceLinks(): Collection|EloquentCollection
     {
         if ($this->is_main) {
@@ -261,7 +223,7 @@ class Store extends Model
             return $this->stockSourceLinks;
         }
 
-        if ($this->stockSourceLinks()->count() > 0) {
+        if ($this->stockSourceLinks()->exists()) {
             return $this->stockSourceLinks;
         }
 
@@ -326,142 +288,11 @@ class Store extends Model
         if ($key === 'country_id') {
             return \App\Models\Country::query()->where('code', 'UA')->value('id');
         }
+        if ($key === 'default_language') {
+            return \App\Models\Language::query()->where('is_default', true)->value('code') ?: 'uk';
+        }
 
         return null;
-    }
-
-    // ------------------------------------------------------------
-    // Working hours (як у тебе було)
-    // ------------------------------------------------------------
-    public function getWorkingHoursAttribute($value): array
-    {
-        $data = is_array($value) ? $value : (json_decode($value ?? '[]', true) ?: []);
-
-        if (isset($data['days']) && is_array($data['days'])) {
-            return $data;
-        }
-
-        $daysOrder = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-        $days = [];
-
-        foreach ($daysOrder as $day) {
-            $intervals = $data[$day] ?? [];
-            $intervals = is_array($intervals) ? array_values($intervals) : [];
-            $intervals = $this->sanitizeIntervals($intervals);
-
-            $days[] = [
-                'day' => $day,
-                'is_closed' => empty($intervals),
-                'intervals' => $intervals,
-                'note' => null,
-            ];
-        }
-
-        return array_merge($data, ['days' => $days]);
-    }
-
-    public function setWorkingHoursAttribute($value): void
-    {
-        $data = $value;
-        if (! is_array($data)) {
-            $data = json_decode($value ?? '[]', true) ?: [];
-        }
-
-        if (isset($data['days']) && is_array($data['days'])) {
-            $normalized = [];
-
-            foreach ($data['days'] as $row) {
-                $day = $row['day'] ?? null;
-                if (! $day) continue;
-
-                $isClosed = (bool)($row['is_closed'] ?? false);
-                $intervals = $isClosed ? [] : (is_array($row['intervals'] ?? null) ? $row['intervals'] : []);
-                $intervals = $this->sanitizeIntervals($intervals);
-
-                if (! empty($intervals)) {
-                    $isClosed = false;
-                }
-
-                $normalized[$day] = $isClosed ? [] : $intervals;
-            }
-
-            $this->attributes['working_hours'] = json_encode($normalized, JSON_UNESCAPED_UNICODE);
-            return;
-        }
-
-        $clean = [];
-        foreach (['mon','tue','wed','thu','fri','sat','sun'] as $day) {
-            $intervals = $data[$day] ?? [];
-            $intervals = is_array($intervals) ? $intervals : [];
-            $clean[$day] = $this->sanitizeIntervals($intervals);
-        }
-
-        $this->attributes['working_hours'] = json_encode($clean, JSON_UNESCAPED_UNICODE);
-    }
-
-    protected function sanitizeIntervals(array $intervals): array
-    {
-        $clean = [];
-
-        foreach ($intervals as $i) {
-            if (! is_array($i)) continue;
-
-            $from = trim((string)($i['from'] ?? ''));
-            $to   = trim((string)($i['to'] ?? ''));
-
-            if (! $this->isValidTime($from) || ! $this->isValidTime($to)) continue;
-
-            $fromMin = $this->timeToMinutes($from);
-            $toMin   = $this->timeToMinutes($to);
-
-            if ($fromMin >= $toMin) continue;
-
-            $clean[] = ['from' => $from, 'to' => $to, '_from' => $fromMin, '_to' => $toMin];
-        }
-
-        usort($clean, fn ($a, $b) => $a['_from'] <=> $b['_from']);
-
-        $merged = [];
-        foreach ($clean as $row) {
-            if (empty($merged)) {
-                $merged[] = $row;
-                continue;
-            }
-
-            $lastIndex = count($merged) - 1;
-            $last = $merged[$lastIndex];
-
-            if ($row['_from'] <= $last['_to']) {
-                $merged[$lastIndex]['_to'] = max($last['_to'], $row['_to']);
-                $merged[$lastIndex]['to'] = $this->minutesToTime($merged[$lastIndex]['_to']);
-                continue;
-            }
-
-            $merged[] = $row;
-        }
-
-        return array_values(array_map(fn ($r) => ['from' => $r['from'], 'to' => $r['to']], $merged));
-    }
-
-    protected function isValidTime(string $time): bool
-    {
-        return (bool) preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $time);
-    }
-
-    protected function timeToMinutes(string $time): int
-    {
-        [$h, $m] = explode(':', $time);
-        return ((int) $h) * 60 + (int) $m;
-    }
-
-    protected function minutesToTime(int $minutes): string
-    {
-        $h = intdiv($minutes, 60);
-        $m = $minutes % 60;
-
-        return str_pad((string) $h, 2, '0', STR_PAD_LEFT)
-            . ':'
-            . str_pad((string) $m, 2, '0', STR_PAD_LEFT);
     }
 
     // ------------------------------------------------------------
@@ -470,10 +301,25 @@ class Store extends Model
     protected static function booted(): void
     {
         static::saving(function (Store $store) {
+            // ✅ авто sort_order якщо не задано
+            if ($store->sort_order === null) {
+                $max = (int) (static::query()->max('sort_order') ?? 0);
+                $store->sort_order = $max > 0 ? ($max + 10) : 100;
+            }
+
+            // ✅ жорсткі правила для головного магазину
             if ($store->is_main) {
                 $store->parent_id = null;
                 $store->type = 'main';
                 $store->inherit_defaults = false;
+
+                // ✅ забороняємо змінювати головну валюту/мову тут:
+                // завжди підтягуємо з "плагінів" (is_default)
+                $store->currency_id = \App\Models\Currency::query()->where('is_default', true)->value('id') ?? $store->currency_id;
+                $store->default_language = \App\Models\Language::query()->where('is_default', true)->value('code') ?? ($store->default_language ?: 'uk');
+
+                // таймзона дефолт
+                $store->timezone = $store->timezone ?: 'Europe/Kyiv';
             }
 
             $base = $store->slug ?: Str::slug($store->name_uk ?: $store->name_en ?: $store->name_ru ?: 'store');
@@ -492,58 +338,12 @@ class Store extends Model
                 if ($lng < -180 || $lng > 180) $store->lng = null;
             }
 
-            // phones normalize + only one primary
-            if (is_array($store->phones)) {
-                $phones = array_values(array_filter(array_map(function ($p) {
-                    if (! is_array($p)) return null;
-
-                    $number = trim((string)($p['number'] ?? ''));
-                    if ($number === '') return null;
-
-                    // ✅ safety: якщо десь не через PhoneInput — нормалізуємо
-                    $number = \App\Rules\UkrainianPhone::normalize($number) ?? $number;
-
-                    return [
-                        'label' => trim((string)($p['label'] ?? '')),
-                        'number' => $number,
-                        'is_primary' => (bool)($p['is_primary'] ?? false),
-                    ];
-                }, $store->phones)));
-
-                $foundPrimary = false;
-                foreach ($phones as $idx => $p) {
-                    if ($p['is_primary'] && ! $foundPrimary) {
-                        $foundPrimary = true;
-                        continue;
-                    }
-                    if ($p['is_primary'] && $foundPrimary) {
-                        $phones[$idx]['is_primary'] = false;
-                    }
-                }
-                if (! $foundPrimary && ! empty($phones)) {
-                    $phones[0]['is_primary'] = true;
-                }
-
-                $store->phones = $phones;
-            }
-
-            if (is_array($store->additional_emails)) {
-                $store->additional_emails = array_values(array_filter(array_map(function ($e) {
-                    if (! is_array($e)) return null;
-
-                    $email = trim((string)($e['email'] ?? ''));
-                    if ($email === '') return null;
-
-                    return [
-                        'label' => trim((string)($e['label'] ?? '')),
-                        'email' => $email,
-                    ];
-                }, $store->additional_emails)));
-            }
-
             $settings = is_array($store->settings) ? $store->settings : [];
             if (! isset($settings['overrides']) || ! is_array($settings['overrides'])) {
                 $settings['overrides'] = [];
+            }
+            if (! isset($settings['localization']) || ! is_array($settings['localization'])) {
+                $settings['localization'] = [];
             }
             $store->settings = $settings;
         });

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Builder;
 
 class StoreStockSource extends Model
 {
@@ -36,12 +37,10 @@ class StoreStockSource extends Model
         'is_active' => 'boolean',
         'priority' => 'integer',
 
-        // ✅ new
         'markup_percent' => 'decimal:2',
         'min_delivery_days' => 'integer',
         'max_delivery_days' => 'integer',
 
-        // existing
         'lead_time_days' => 'integer',
         'pickup_available' => 'boolean',
         'price_multiplier' => 'decimal:4',
@@ -61,6 +60,8 @@ class StoreStockSource extends Model
         return $this->belongsTo(StockSource::class, 'stock_source_id');
     }
 
-    // (опційно на майбутнє)
-    // public function scopeActive($q) { return $q->where('is_active', true); }
+    public function scopeActive(Builder $q): Builder
+    {
+        return $q->where('is_active', true);
+    }
 }

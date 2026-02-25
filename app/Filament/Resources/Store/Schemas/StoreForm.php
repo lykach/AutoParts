@@ -20,10 +20,6 @@ use Illuminate\Support\Str;
 
 class StoreForm
 {
-    /**
-     * Нормалізує priority для pivot-рядків у вигляді 10/20/30...
-     * Важливо: ключі в Repeater можуть бути UUID (рядки), тому ніколи не використовуємо $i + 1.
-     */
     protected static function normalizeStockSourcePriorities($state): array
     {
         if (! is_array($state)) {
@@ -43,10 +39,40 @@ class StoreForm
         return $state;
     }
 
+    /**
+     * ✅ Забираємо з додаткових те, що вже вибрано як основне
+     * (щоб не було дублювання currency_id / default_language)
+     */
+    protected static function cleanAdditionalLocalization(array $state): array
+    {
+        // additional_currency_ids: прибираємо основну валюту
+        $mainCurrencyId = $state['currency_id'] ?? null;
+        $addCurrencies = data_get($state, 'settings.localization.additional_currency_ids', []);
+        if (is_array($addCurrencies)) {
+            $addCurrencies = array_values(array_filter($addCurrencies, fn ($id) => (string) $id !== (string) $mainCurrencyId));
+            data_set($state, 'settings.localization.additional_currency_ids', $addCurrencies);
+        }
+
+        // additional_languages: прибираємо основну мову
+        $mainLang = $state['default_language'] ?? null;
+        $addLangs = data_get($state, 'settings.localization.additional_languages', []);
+        if (is_array($addLangs)) {
+            $addLangs = array_values(array_filter($addLangs, fn ($code) => (string) $code !== (string) $mainLang));
+            data_set($state, 'settings.localization.additional_languages', $addLangs);
+        }
+
+        return $state;
+    }
+
     public static function configure(Schema $schema): Schema
     {
         $disabledIfInherited = fn ($get, string $overrideKey) =>
             ((bool) $get('inherit_defaults') && ! (bool) $get('is_main') && ! (bool) $get("settings.overrides.$overrideKey"));
+
+        $defaultCurrencyId = fn () => (int) (\App\Models\Currency::query()->where('is_default', true)->value('id') ?? 1);
+        $defaultLanguageCode = fn () => (string) (\App\Models\Language::query()->where('is_default', true)->value('code') ?? 'uk');
+
+        $lockedForMain = fn ($get) => (bool) $get('is_main');
 
         return $schema
             ->columns(1)
@@ -72,11 +98,15 @@ class StoreForm
                                                 Toggle::make('is_main')
                                                     ->label('Головний магазин')
                                                     ->live()
-                                                    ->afterStateUpdated(function (?bool $state, $set) {
+                                                    ->afterStateUpdated(function (?bool $state, $set) use ($defaultCurrencyId, $defaultLanguageCode) {
                                                         if ($state) {
                                                             $set('parent_id', null);
                                                             $set('type', 'main');
                                                             $set('inherit_defaults', false);
+
+                                                            $set('currency_id', $defaultCurrencyId());
+                                                            $set('default_language', $defaultLanguageCode());
+                                                            $set('timezone', 'Europe/Kyiv');
                                                         } else {
                                                             $set('inherit_defaults', true);
                                                         }
@@ -116,7 +146,12 @@ class StoreForm
                                                 TextInput::make('sort_order')
                                                     ->label('Сортування')
                                                     ->numeric()
-                                                    ->default(100),
+                                                    ->helperText('Якщо не вказати — поставиться автоматично (max+10).')
+                                                    ->placeholder('авто')
+                                                    ->default(fn () => ((int) (Store::query()->max('sort_order') ?? 0)) > 0
+                                                        ? ((int) Store::query()->max('sort_order') + 10)
+                                                        : 100
+                                                    ),
                                             ]),
 
                                         Section::make('Спадкування по секціях (Overrides)')
@@ -160,9 +195,9 @@ class StoreForm
                                                     ->columnSpan(['default' => 1, 'md' => 2]),
                                             ]),
 
-                                        Grid::make(['default' => 1, 'lg' => 2])->schema([
-                                            Section::make('Країна / валюта')
-                                                ->columns(['default' => 1, 'md' => 2])
+                                        Grid::make(['default' => 1, 'lg' => 1])->schema([
+                                            Section::make('Країна')
+                                                ->columns(['default' => 1, 'lg' => 1])
                                                 ->schema([
                                                     Select::make('country_id')
                                                         ->label('Країна')
@@ -173,30 +208,119 @@ class StoreForm
                                                             ->orderBy('sort_order')
                                                             ->pluck('name_uk', 'id')
                                                             ->all()
-                                                        ),
-
-                                                    Select::make('currency_id')
-                                                        ->label('Валюта')
-                                                        ->searchable()
-                                                        ->preload()
-                                                        ->options(fn () => \App\Models\Currency::query()
-                                                            ->where('is_active', true)
-                                                            ->orderByDesc('is_default')
-                                                            ->orderBy('code')
-                                                            ->pluck('code', 'id')
-                                                            ->all()
-                                                        ),
+                                                        )
+                                                        ->columnSpanFull(),
                                                 ]),
 
                                             Section::make('Локалізація')->schema([
-                                                TextInput::make('timezone')
-                                                    ->label('Часовий пояс')
-                                                    ->maxLength(64)
-                                                    ->placeholder('Europe/Uzhgorod'),
+                                                Select::make('currency_id')
+                                                    ->label('Валюта (основна)')
+                                                    ->searchable()
+                                                    ->preload()
+                                                    ->options(fn () => \App\Models\Currency::query()
+                                                        ->where('is_active', true)
+                                                        ->orderByDesc('is_default')
+                                                        ->orderBy('code')
+                                                        ->pluck('code', 'id')
+                                                        ->all()
+                                                    )
+                                                    ->live()
+                                                    ->afterStateUpdated(function ($state, $set, $get) {
+                                                        // ✅ якщо змінили основну валюту — прибрати її з додаткових
+                                                        $add = $get('settings.localization.additional_currency_ids');
+                                                        if (! is_array($add)) return;
+                                                        $add = array_values(array_filter($add, fn ($id) => (string) $id !== (string) $state));
+                                                        $set('settings.localization.additional_currency_ids', $add);
+                                                    })
+                                                    ->disabled($lockedForMain)
+                                                    ->helperText(fn ($get) => (bool) $get('is_main')
+                                                        ? 'Для Головного магазину змінюється у модулі валют (заблоковано тут).'
+                                                        : null
+                                                    )
+                                                    ->columnSpanFull(),
 
                                                 Select::make('default_language')
                                                     ->label('Мова за замовчуванням')
-                                                    ->options(['uk' => 'uk', 'en' => 'en', 'ru' => 'ru']),
+                                                    ->searchable()
+                                                    ->preload()
+                                                    ->options(fn () => \App\Models\Language::query()
+                                                        ->where('is_active', true)
+                                                        ->orderByDesc('is_default')
+                                                        ->orderBy('code')
+                                                        ->pluck('name_uk', 'code')
+                                                        ->all()
+                                                    )
+                                                    ->live()
+                                                    ->afterStateUpdated(function ($state, $set, $get) {
+                                                        // ✅ якщо змінили основну мову — прибрати її з додаткових
+                                                        $add = $get('settings.localization.additional_languages');
+                                                        if (! is_array($add)) return;
+                                                        $add = array_values(array_filter($add, fn ($code) => (string) $code !== (string) $state));
+                                                        $set('settings.localization.additional_languages', $add);
+                                                    })
+                                                    ->disabled($lockedForMain)
+                                                    ->helperText(fn ($get) => (bool) $get('is_main')
+                                                        ? 'Для Головного магазину змінюється у модулі мов (заблоковано тут).'
+                                                        : null
+                                                    )
+                                                    ->columnSpanFull(),
+
+                                                TextInput::make('timezone')
+                                                    ->label('Часовий пояс')
+                                                    ->maxLength(64)
+                                                    ->placeholder('Europe/Kyiv')
+                                                    ->columnSpanFull(),
+
+                                                // ✅ Додаткові валюти: НЕ показувати основну валюту в опціях
+                                                Select::make('settings.localization.additional_currency_ids')
+                                                    ->label('Додаткові валюти (опційно)')
+                                                    ->helperText('Дублювання з основною валютою не дозволяється.')
+                                                    ->multiple()
+                                                    ->searchable()
+                                                    ->preload()
+                                                    ->options(function ($get) {
+                                                        $mainId = $get('currency_id');
+
+                                                        return \App\Models\Currency::query()
+                                                            ->where('is_active', true)
+                                                            ->when($mainId, fn ($q) => $q->where('id', '!=', $mainId))
+                                                            ->orderByDesc('is_default')
+                                                            ->orderBy('code')
+                                                            ->pluck('code', 'id')
+                                                            ->all();
+                                                    })
+                                                    // ✅ фінальний safety перед збереженням
+                                                    ->mutateDehydratedStateUsing(function ($state, $get) {
+                                                        if (! is_array($state)) return [];
+                                                        $main = $get('currency_id');
+                                                        return array_values(array_filter($state, fn ($id) => (string) $id !== (string) $main));
+                                                    })
+                                                    ->columnSpanFull(),
+
+                                                // ✅ Додаткові мови: НЕ показувати основну мову в опціях
+                                                Select::make('settings.localization.additional_languages')
+                                                    ->label('Додаткові мови (опційно)')
+                                                    ->helperText('Дублювання з мовою за замовчуванням не дозволяється.')
+                                                    ->multiple()
+                                                    ->searchable()
+                                                    ->preload()
+                                                    ->options(function ($get) {
+                                                        $main = $get('default_language');
+
+                                                        return \App\Models\Language::query()
+                                                            ->where('is_active', true)
+                                                            ->when($main, fn ($q) => $q->where('code', '!=', $main))
+                                                            ->orderByDesc('is_default')
+                                                            ->orderBy('code')
+                                                            ->pluck('name_uk', 'code')
+                                                            ->all();
+                                                    })
+                                                    ->mutateDehydratedStateUsing(function ($state, $get) {
+                                                        if (! is_array($state)) return [];
+                                                        $main = $get('default_language');
+                                                        return array_values(array_filter($state, fn ($code) => (string) $code !== (string) $main));
+                                                    })
+                                                    ->columnSpanFull(),
                                             ]),
                                         ]),
                                     ]),
@@ -239,22 +363,15 @@ class StoreForm
                                         ->defaultItems(0)
                                         ->reorderable()
                                         ->collapsible()
-
-                                        // ✅ 100% стабільно: нормалізація перед збереженням (dehydrate)
                                         ->mutateDehydratedStateUsing(fn ($state) => static::normalizeStockSourcePriorities($state))
-
-                                        // ✅ UX: також перераховуємо після змін (без string+int і без циклів)
                                         ->afterStateUpdated(function ($state, $set) {
                                             if (! is_array($state)) return;
 
                                             $normalized = static::normalizeStockSourcePriorities($state);
-
-                                            // ставимо тільки якщо реально різниця, щоб не ловити зайві тригери
                                             if ($normalized !== $state) {
                                                 $set('stockSourceLinks', $normalized);
                                             }
                                         })
-
                                         ->schema([
                                             Grid::make(['default' => 1, 'md' => 4])->schema([
                                                 Select::make('stock_source_id')
@@ -268,119 +385,44 @@ class StoreForm
                                                         ->pluck('name', 'id')
                                                         ->all()
                                                     ),
-
-                                                Toggle::make('is_active')
-                                                    ->label('Активно')
-                                                    ->default(true),
-
-                                                TextInput::make('priority')
-                                                    ->label('Пріоритет')
-                                                    ->numeric()
-                                                    ->default(100)
-                                                    ->helperText('Авто: 10/20/30… (менше = важливіше).'),
-
-                                                Toggle::make('pickup_available')
-                                                    ->label('Самовивіз')
-                                                    ->default(false),
+                                                Toggle::make('is_active')->label('Активно')->default(true),
+                                                TextInput::make('priority')->label('Пріоритет')->numeric()->default(100)->helperText('Авто: 10/20/30…'),
+                                                Toggle::make('pickup_available')->label('Самовивіз')->default(false),
                                             ]),
-
                                             Grid::make(['default' => 1, 'md' => 4])->schema([
-                                                TextInput::make('min_delivery_days')
-                                                    ->label('Доставка (мін. днів)')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->maxValue(365)
-                                                    ->placeholder('0'),
-
-                                                TextInput::make('max_delivery_days')
-                                                    ->label('Доставка (макс. днів)')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->maxValue(365)
-                                                    ->placeholder('3')
+                                                TextInput::make('min_delivery_days')->label('Доставка (мін. днів)')->numeric()->minValue(0)->maxValue(365)->placeholder('0'),
+                                                TextInput::make('max_delivery_days')->label('Доставка (макс. днів)')->numeric()->minValue(0)->maxValue(365)->placeholder('3')
                                                     ->rule(function ($get) {
                                                         $min = $get('min_delivery_days');
                                                         if ($min === null || $min === '') return null;
                                                         return 'gte:min_delivery_days';
-                                                    })
-                                                    ->helperText('Максимум має бути ≥ мінімуму.'),
-
-                                                TextInput::make('markup_percent')
-                                                    ->label('Націнка (%)')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->maxValue(9999.99)
-                                                    ->placeholder('0')
-                                                    ->suffix('%'),
-
-                                                TextInput::make('lead_time_days')
-                                                    ->label('Lead time (дні)')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->maxValue(365)
-                                                    ->placeholder('0-14'),
+                                                    }),
+                                                TextInput::make('markup_percent')->label('Націнка (%)')->numeric()->minValue(0)->maxValue(9999.99)->placeholder('0')->suffix('%'),
+                                                TextInput::make('lead_time_days')->label('Lead time (дні)')->numeric()->minValue(0)->maxValue(365)->placeholder('0-14'),
                                             ]),
-
                                             Grid::make(['default' => 1, 'md' => 4])->schema([
-                                                TextInput::make('cutoff_time')
-                                                    ->label('Cutoff (HH:MM)')
-                                                    ->mask('99:99')
-                                                    ->maxLength(5)
-                                                    ->placeholder('16:00')
-                                                    ->rule('regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/')
-                                                    ->helperText('Формат 00:00–23:59'),
-
-                                                TextInput::make('price_multiplier')
-                                                    ->label('Множник ціни')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->placeholder('1.0000')
-                                                    ->helperText('1.05 = +5% поверх базової'),
-
-                                                TextInput::make('extra_fee')
-                                                    ->label('Дод. збір')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->placeholder('0.00'),
-
-                                                TextInput::make('min_order_amount')
-                                                    ->label('Мін. сума')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->placeholder('0.00'),
+                                                TextInput::make('cutoff_time')->label('Cutoff (HH:MM)')->mask('99:99')->maxLength(5)->placeholder('16:00')
+                                                    ->rule('regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/'),
+                                                TextInput::make('price_multiplier')->label('Множник ціни')->numeric()->minValue(0)->placeholder('1.0000'),
+                                                TextInput::make('extra_fee')->label('Дод. збір')->numeric()->minValue(0)->placeholder('0.00'),
+                                                TextInput::make('min_order_amount')->label('Мін. сума')->numeric()->minValue(0)->placeholder('0.00'),
                                             ]),
-
                                             Grid::make(['default' => 1, 'md' => 2])->schema([
-                                                TextInput::make('note')
-                                                    ->label('Примітка')
-                                                    ->maxLength(255),
-
-                                                KeyValue::make('settings')
-                                                    ->label('settings')
-                                                    ->helperText('Дрібні параметри (API codes, правила, винятки).'),
+                                                TextInput::make('note')->label('Примітка')->maxLength(255),
+                                                KeyValue::make('settings')->label('settings'),
                                             ]),
                                         ]),
                                 ]),
                         ]),
-
-                        // =====================================================
+                        
+						// =====================================================
                         // КОНТАКТИ
                         // =====================================================
                         Tab::make('Контакти')->schema([
                             Grid::make(['default' => 1, 'lg' => 2])->schema([
                                 Section::make('Основні контакти')->schema([
-                                    TextInput::make('email')
-                                        ->label('Email')
-                                        ->email()
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'contacts')),
-
-                                    TextInput::make('website_url')
-                                        ->label('Сайт')
-                                        ->url()
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'contacts')),
-
+                                    TextInput::make('email')->label('Email')->email()->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'contacts')),
+                                    TextInput::make('website_url')->label('Сайт')->url()->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'contacts')),
                                     Repeater::make('additional_emails')
                                         ->label('Додаткові email')
                                         ->disabled(fn ($get) => $disabledIfInherited($get, 'contacts'))
@@ -394,7 +436,6 @@ class StoreForm
                                         ->reorderable()
                                         ->collapsible(),
                                 ]),
-
                                 Section::make('Телефони')->schema([
                                     Repeater::make('phones')
                                         ->label('Телефони')
@@ -402,35 +443,18 @@ class StoreForm
                                         ->defaultItems(0)
                                         ->schema([
                                             Grid::make(['default' => 1, 'md' => 12])->schema([
-                                                TextInput::make('label')
-                                                    ->label('Мітка')
-                                                    ->maxLength(50)
-                                                    ->columnSpan(3),
-
-                                                PhoneInput::make('number')
-                                                    ->label('Номер')
-                                                    ->required()
-                                                    ->columnSpan(7),
-
-                                                Toggle::make('is_primary')
-                                                    ->label('Основний')
-                                                    ->inline(false) // ✅ label над toggle
-                                                    ->live()
+                                                TextInput::make('label')->label('Мітка')->maxLength(50)->columnSpan(3),
+                                                PhoneInput::make('number')->label('Номер')->required()->columnSpan(7),
+                                                Toggle::make('is_primary')->label('Основний')->inline(false)->live()
                                                     ->afterStateUpdated(function ($state, $set, $get) {
-                                                        if (! $state) {
-                                                            return;
-                                                        }
+                                                        if (! $state) return;
 
                                                         $current = (string) ($get('number') ?? '');
                                                         $phones = $get('../../phones');
-
-                                                        if (! is_array($phones)) {
-                                                            return;
-                                                        }
+                                                        if (! is_array($phones)) return;
 
                                                         foreach ($phones as $k => $p) {
                                                             $num = (string) (($p['number'] ?? ''));
-
                                                             if ($num !== '' && $num !== $current) {
                                                                 $phones[$k]['is_primary'] = false;
                                                             }
@@ -446,8 +470,8 @@ class StoreForm
                                 ]),
                             ]),
                         ]),
-
-                        // =====================================================
+                        
+						// =====================================================
                         // ГРАФІК
                         // =====================================================
                         Tab::make('Графік')->schema([
@@ -471,18 +495,9 @@ class StoreForm
                                             Select::make('day')->label('День')->options([
                                                 'mon' => 'Пн','tue' => 'Вт','wed' => 'Ср','thu' => 'Чт','fri' => 'Пт','sat' => 'Сб','sun' => 'Нд',
                                             ])->required(),
-
-                                            Toggle::make('is_closed')
-                                                ->label('Вихідний')
-                                                ->live()
-                                                ->afterStateUpdated(fn ($s, $set) => $s ? $set('intervals', []) : null),
-
-                                            TextInput::make('note')
-                                                ->label('Примітка')
-                                                ->maxLength(255)
-                                                ->columnSpan(['default' => 1, 'md' => 2]),
+                                            Toggle::make('is_closed')->label('Вихідний')->live()->afterStateUpdated(fn ($s, $set) => $s ? $set('intervals', []) : null),
+                                            TextInput::make('note')->label('Примітка')->maxLength(255)->columnSpan(['default' => 1, 'md' => 2]),
                                         ]),
-
                                         Repeater::make('intervals')
                                             ->label('Інтервали')
                                             ->visible(fn ($get) => ! (bool) $get('is_closed'))
@@ -500,8 +515,8 @@ class StoreForm
                                     ->collapsible(),
                             ]),
                         ]),
-
-                        // =====================================================
+                        
+						// =====================================================
                         // Доставка (скорочено)
                         // =====================================================
                         Tab::make('Доставка')->schema([
@@ -536,8 +551,8 @@ class StoreForm
                                         ->collapsible(),
                                 ]),
                         ]),
-
-                        // =====================================================
+                        
+						// =====================================================
                         // SEO (скорочено)
                         // =====================================================
                         Tab::make('SEO')->schema([
@@ -550,8 +565,8 @@ class StoreForm
                                 KeyValue::make('seo')->label('seo')->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
                             ]),
                         ]),
-
-                        // =====================================================
+                        
+						// =====================================================
                         // Юридичні
                         // =====================================================
                         Tab::make('Юридичні')->schema([
@@ -562,12 +577,16 @@ class StoreForm
                                     TextInput::make('vat')->label('VAT/ІПН')->maxLength(30)->disabled(fn ($get) => $disabledIfInherited($get, 'legal')),
                                     Textarea::make('legal_address')->label('Юридична адреса')->rows(3)->disabled(fn ($get) => $disabledIfInherited($get, 'legal')),
                                 ]),
-                                Section::make('Settings JSON')->schema([
-                                    KeyValue::make('settings')->label('settings'),
-                                ]),
+                                Section::make('Додаткові налаштування (extra)')
+                                    ->description('Службові/дрібні параметри. Не чіпає overrides.')
+                                    ->schema([
+                                        KeyValue::make('settings.extra')->label('settings.extra'),
+                                    ]),
                             ]),
                         ]),
-                    ]),
+                    ])
+                    // ✅ глобальний safety: перед збереженням чистимо дублікати
+                    ->mutateDehydratedStateUsing(fn (array $state) => static::cleanAdditionalLocalization($state)),
             ]);
     }
 }
