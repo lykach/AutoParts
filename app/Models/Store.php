@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class Store extends Model
 {
@@ -24,8 +25,7 @@ class Store extends Model
         'slug',
         'type',
 
-        'name_uk', 'name_en', 'name_ru',
-        'short_name_uk', 'short_name_en', 'short_name_ru',
+        'name_uk',
 
         'is_active',
         'sort_order',
@@ -110,9 +110,6 @@ class Store extends Model
         'settings' => 'array',
     ];
 
-    // ------------------------------------------------------------
-    // Relations / Scopes
-    // ------------------------------------------------------------
     public function parent(): BelongsTo
     {
         return $this->belongsTo(Store::class, 'parent_id');
@@ -182,12 +179,9 @@ class Store extends Model
 
     public function getDisplayNameAttribute(): string
     {
-        return $this->name_uk ?: $this->name_en ?: $this->name_ru ?: ('Store #' . $this->id);
+        return $this->name_uk ?: ('Store #' . $this->id);
     }
 
-    // ------------------------------------------------------------
-    // Resolved getters
-    // ------------------------------------------------------------
     public function resolvedCountryId(): ?int
     {
         return $this->resolveValue('country_id');
@@ -210,39 +204,25 @@ class Store extends Model
 
     public function resolvedStockSourceLinks(): Collection|EloquentCollection
     {
-        if ($this->is_main) {
-            return $this->stockSourceLinks;
-        }
+        if ($this->is_main) return $this->stockSourceLinks;
 
-        if (! $this->inherit_defaults) {
-            return $this->stockSourceLinks;
-        }
+        if (! $this->inherit_defaults) return $this->stockSourceLinks;
 
         $override = (bool) data_get($this->settings ?? [], 'overrides.stock_sources', false);
-        if ($override) {
-            return $this->stockSourceLinks;
-        }
+        if ($override) return $this->stockSourceLinks;
 
-        if ($this->stockSourceLinks()->exists()) {
-            return $this->stockSourceLinks;
-        }
+        if ($this->stockSourceLinks()->exists()) return $this->stockSourceLinks;
 
         return $this->parent ? $this->parent->resolvedStockSourceLinks() : $this->stockSourceLinks;
     }
 
     protected function resolveValue(string $key, int $depth = 0)
     {
-        if ($depth > 10) {
-            return $this->{$key} ?? null;
-        }
+        if ($depth > 10) return $this->{$key} ?? null;
 
-        if ($this->is_main) {
-            return $this->{$key} ?? null;
-        }
+        if ($this->is_main) return $this->{$key} ?? null;
 
-        if (! $this->inherit_defaults) {
-            return $this->{$key} ?? null;
-        }
+        if (! $this->inherit_defaults) return $this->{$key} ?? null;
 
         $overrides = (array) data_get($this->settings ?? [], 'overrides', []);
 
@@ -271,7 +251,6 @@ class Store extends Model
         }
 
         $own = $this->{$key} ?? null;
-
         $isEmptyArray = is_array($own) && count($own) === 0;
 
         if ($own !== null && ! $isEmptyArray && $own !== '') {
@@ -295,34 +274,47 @@ class Store extends Model
         return null;
     }
 
-    // ------------------------------------------------------------
-    // Boot
-    // ------------------------------------------------------------
     protected static function booted(): void
     {
         static::saving(function (Store $store) {
-            // ✅ авто sort_order якщо не задано
             if ($store->sort_order === null) {
                 $max = (int) (static::query()->max('sort_order') ?? 0);
                 $store->sort_order = $max > 0 ? ($max + 10) : 100;
             }
 
-            // ✅ жорсткі правила для головного магазину
+            $store->type = in_array($store->type, ['main', 'branch'], true) ? $store->type : 'branch';
+
             if ($store->is_main) {
+                $existsAnotherMain = static::query()
+                    ->where('is_main', true)
+                    ->when($store->id, fn ($q) => $q->where('id', '!=', $store->id))
+                    ->exists();
+
+                if ($existsAnotherMain) {
+                    throw ValidationException::withMessages([
+                        'is_main' => 'Головний магазин може бути лише один.',
+                    ]);
+                }
+
                 $store->parent_id = null;
                 $store->type = 'main';
                 $store->inherit_defaults = false;
 
-                // ✅ забороняємо змінювати головну валюту/мову тут:
-                // завжди підтягуємо з "плагінів" (is_default)
+                // ✅ валюта/мова з default
                 $store->currency_id = \App\Models\Currency::query()->where('is_default', true)->value('id') ?? $store->currency_id;
                 $store->default_language = \App\Models\Language::query()->where('is_default', true)->value('code') ?? ($store->default_language ?: 'uk');
 
-                // таймзона дефолт
                 $store->timezone = $store->timezone ?: 'Europe/Kyiv';
+
+                // ✅ ОВЕРРАЙДИ ДЛЯ MAIN НЕ МАЮТЬ СЕНСУ — ПРИБИВАЄМО
+                $settings = is_array($store->settings) ? $store->settings : [];
+                $settings['overrides'] = [];
+                $store->settings = $settings;
+            } else {
+                if ($store->type === 'main') $store->type = 'branch';
             }
 
-            $base = $store->slug ?: Str::slug($store->name_uk ?: $store->name_en ?: $store->name_ru ?: 'store');
+            $base = $store->slug ?: Str::slug($store->name_uk ?: 'store');
             $store->slug = static::makeUniqueSlug($base, $store->id);
 
             $store->website_url = $store->website_url ? trim($store->website_url) : null;
