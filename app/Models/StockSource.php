@@ -19,19 +19,19 @@ class StockSource extends Model
 
         'default_currency_code',
 
+        // ✅ дефолтна доставка
+        'delivery_unit', // days|hours
+        'delivery_min',
+        'delivery_max',
+
         'contact_name',
         'phone',
         'email',
         'website_url',
 
         'country',
-        'region',
         'city',
-        'address_line1',
-        'address_line2',
-        'postal_code',
-        'lat',
-        'lng',
+        'address_line1', // UI: "Вулиця"
 
         'settings',
         'note',
@@ -42,8 +42,10 @@ class StockSource extends Model
         'sort_order' => 'integer',
         'default_currency_code' => 'string',
 
-        'lat' => 'decimal:7',
-        'lng' => 'decimal:7',
+        'delivery_unit' => 'string',
+        'delivery_min' => 'integer',
+        'delivery_max' => 'integer',
+
         'settings' => 'array',
     ];
 
@@ -106,16 +108,24 @@ class StockSource extends Model
 
             $s->type = trim((string) $s->type);
 
-            // ✅ Валюта за замовчуванням
             $s->default_currency_code = $s->default_currency_code
                 ? Str::upper(trim((string) $s->default_currency_code))
                 : 'UAH';
 
-            /**
-             * ✅ Авто sort_order:
-             * - якщо створення і sort_order не заданий → max + 100
-             * - якщо редагування і стерли → залишаємо попередній
-             */
+            // ✅ доставка дефолт: days|hours
+            $unit = strtolower(trim((string) ($s->delivery_unit ?? 'days')));
+            $s->delivery_unit = in_array($unit, ['days', 'hours'], true) ? $unit : 'days';
+
+            $s->delivery_min = filled($s->delivery_min) ? (int) $s->delivery_min : null;
+            $s->delivery_max = filled($s->delivery_max) ? (int) $s->delivery_max : null;
+
+            if ($s->delivery_min !== null && $s->delivery_min < 0) $s->delivery_min = 0;
+            if ($s->delivery_max !== null && $s->delivery_max < 0) $s->delivery_max = 0;
+
+            if ($s->delivery_min !== null && $s->delivery_max !== null && $s->delivery_min > $s->delivery_max) {
+                [$s->delivery_min, $s->delivery_max] = [$s->delivery_max, $s->delivery_min];
+            }
+
             if ($s->sort_order === null) {
                 if ($s->exists) {
                     $s->sort_order = (int) ($s->getOriginal('sort_order') ?? 100);
@@ -158,5 +168,27 @@ class StockSource extends Model
             'dropship'          => 'Dropship',
             'other'             => 'Інше',
         ];
+    }
+
+    public static function deliveryUnitOptions(): array
+    {
+        return [
+            'days' => 'Дні',
+            'hours' => 'Години',
+        ];
+    }
+
+    public function formatDelivery(): string
+    {
+        $u = $this->delivery_unit ?: 'days';
+        $suffix = $u === 'hours' ? 'год.' : 'дн.';
+
+        $min = $this->delivery_min;
+        $max = $this->delivery_max;
+
+        if ($min === null && $max === null) return '—';
+        if ($min !== null && $max !== null) return "{$min}-{$max} {$suffix}";
+        if ($min !== null) return "від {$min} {$suffix}";
+        return "до {$max} {$suffix}";
     }
 }

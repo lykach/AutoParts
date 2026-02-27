@@ -14,16 +14,24 @@ class StockItem extends Model
 
         'qty',
         'reserved_qty',
+        'available_qty',
+        'sellable_qty',
 
-        // ✅ renamed
         'multiplicity',
-
         'availability_status',
 
         'price_purchase',
+        'price_purchase_uah',
         'price_sell',
+        'price_sell_uah',
         'currency',
 
+        // ✅ нові
+        'delivery_unit', // days|hours|null(inherit)
+        'delivery_min',
+        'delivery_max',
+
+        // legacy (не чіпаємо, але UI не використовуємо)
         'delivery_days_min',
         'delivery_days_max',
 
@@ -38,13 +46,21 @@ class StockItem extends Model
 
         'qty' => 'decimal:3',
         'reserved_qty' => 'decimal:3',
+        'available_qty' => 'decimal:3',
+        'sellable_qty' => 'decimal:3',
 
         'multiplicity' => 'integer',
         'availability_status' => 'string',
 
         'price_purchase' => 'decimal:2',
+        'price_purchase_uah' => 'decimal:2',
         'price_sell' => 'decimal:2',
+        'price_sell_uah' => 'decimal:2',
         'currency' => 'string',
+
+        'delivery_unit' => 'string',
+        'delivery_min' => 'integer',
+        'delivery_max' => 'integer',
 
         'delivery_days_min' => 'integer',
         'delivery_days_max' => 'integer',
@@ -79,32 +95,14 @@ class StockItem extends Model
         ];
     }
 
-    public function getAvailableQtyAttribute(): float
+    public static function deliveryUnitOptions(): array
     {
-        $qty = (float) ($this->qty ?? 0);
-        $res = (float) ($this->reserved_qty ?? 0);
-
-        return max(0, $qty - $res);
+        return [
+            'days' => 'Дні',
+            'hours' => 'Години',
+        ];
     }
 
-    public function getAvailableForSaleQtyAttribute(): float
-    {
-        $available = $this->available_qty;
-        $m = (int) ($this->multiplicity ?? 1);
-
-        if ($m <= 1) {
-            return $available;
-        }
-
-        $eps = 0.00001;
-        $packsCount = (int) floor(($available + $eps) / $m);
-
-        return max(0, $packsCount * $m);
-    }
-
-    // -------------------------
-    // Currency helpers
-    // -------------------------
     private static array $rateCache = [];
 
     public static function rateToUah(?string $code): float
@@ -112,9 +110,7 @@ class StockItem extends Model
         $code = strtoupper(trim((string) $code));
         if ($code === '') $code = 'UAH';
 
-        if (isset(self::$rateCache[$code])) {
-            return self::$rateCache[$code];
-        }
+        if (isset(self::$rateCache[$code])) return self::$rateCache[$code];
 
         $rate = (float) (Currency::query()
             ->where('code', $code)
@@ -125,19 +121,103 @@ class StockItem extends Model
         return self::$rateCache[$code] = $rate;
     }
 
-    public function getPriceSellUahAttribute(): ?float
+    protected static function booted(): void
     {
-        if ($this->price_sell === null) return null;
-        $rate = self::rateToUah($this->currency);
+        static::saving(function (self $i) {
+            // -------- qty/available/sellable --------
+            $qty = (float) ($i->qty ?? 0);
+            $res = (float) ($i->reserved_qty ?? 0);
 
-        return round(((float) $this->price_sell) * $rate, 2);
+            $available = max(0, $qty - $res);
+            $i->available_qty = round($available, 3);
+
+            $m = (int) ($i->multiplicity ?? 1);
+            if ($m <= 1) {
+                $sellable = $available;
+            } else {
+                $eps = 0.00001;
+                $packs = (int) floor(($available + $eps) / $m);
+                $sellable = max(0, $packs * $m);
+            }
+            $i->sellable_qty = round($sellable, 3);
+
+            // -------- currency + uah --------
+            $cur = strtoupper(trim((string) ($i->currency ?? 'UAH')));
+            if ($cur === '') $cur = 'UAH';
+            $i->currency = $cur;
+
+            $rate = self::rateToUah($cur);
+
+            $i->price_purchase_uah = $i->price_purchase === null ? null : round(((float) $i->price_purchase) * $rate, 2);
+            $i->price_sell_uah     = $i->price_sell === null ? null : round(((float) $i->price_sell) * $rate, 2);
+
+            // -------- delivery defaults/override --------
+            $i->delivery_min = filled($i->delivery_min) ? (int) $i->delivery_min : null;
+            $i->delivery_max = filled($i->delivery_max) ? (int) $i->delivery_max : null;
+
+            if (filled($i->delivery_unit)) {
+                $u = strtolower(trim((string) $i->delivery_unit));
+                $i->delivery_unit = in_array($u, ['days', 'hours'], true) ? $u : null;
+            } else {
+                $i->delivery_unit = null;
+            }
+
+            if ($i->delivery_min !== null && $i->delivery_min < 0) $i->delivery_min = 0;
+            if ($i->delivery_max !== null && $i->delivery_max < 0) $i->delivery_max = 0;
+
+            if ($i->delivery_min !== null && $i->delivery_max !== null && $i->delivery_min > $i->delivery_max) {
+                [$i->delivery_min, $i->delivery_max] = [$i->delivery_max, $i->delivery_min];
+            }
+
+            // якщо не задано — наслідуємо зі складу (а він уже наслідує з джерела)
+            if (($i->delivery_unit === null) || ($i->delivery_min === null && $i->delivery_max === null)) {
+                $loc = StockSourceLocation::query()
+                    ->select(['id', 'delivery_unit', 'delivery_min', 'delivery_max', 'stock_source_id'])
+                    ->whereKey($i->stock_source_location_id)
+                    ->first();
+
+                if ($i->delivery_unit === null) {
+                    $i->delivery_unit = $loc?->delivery_unit ?: null;
+                }
+
+                if ($i->delivery_min === null && $i->delivery_max === null) {
+                    $i->delivery_min = $loc?->delivery_min;
+                    $i->delivery_max = $loc?->delivery_max;
+                }
+
+                // fallback ще на джерело, якщо у локації пусто
+                if (($i->delivery_unit === null) || ($i->delivery_min === null && $i->delivery_max === null)) {
+                    $srcId = $i->stock_source_id ?: $loc?->stock_source_id;
+                    if ($srcId) {
+                        $src = StockSource::query()
+                            ->select(['id', 'delivery_unit', 'delivery_min', 'delivery_max'])
+                            ->whereKey($srcId)
+                            ->first();
+
+                        if ($i->delivery_unit === null) $i->delivery_unit = $src?->delivery_unit ?: 'days';
+                        if ($i->delivery_min === null && $i->delivery_max === null) {
+                            $i->delivery_min = $src?->delivery_min;
+                            $i->delivery_max = $src?->delivery_max;
+                        }
+                    } else {
+                        if ($i->delivery_unit === null) $i->delivery_unit = 'days';
+                    }
+                }
+            }
+        });
     }
 
-    public function getPricePurchaseUahAttribute(): ?float
+    public function formatDelivery(): string
     {
-        if ($this->price_purchase === null) return null;
-        $rate = self::rateToUah($this->currency);
+        $u = $this->delivery_unit ?: 'days';
+        $suffix = $u === 'hours' ? 'год.' : 'дн.';
 
-        return round(((float) $this->price_purchase) * $rate, 2);
+        $min = $this->delivery_min;
+        $max = $this->delivery_max;
+
+        if ($min === null && $max === null) return '—';
+        if ($min !== null && $max !== null) return "{$min}-{$max} {$suffix}";
+        if ($min !== null) return "від {$min} {$suffix}";
+        return "до {$max} {$suffix}";
     }
 }

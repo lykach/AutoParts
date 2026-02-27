@@ -30,7 +30,6 @@ class StockSourceTable
                 ]);
             })
 
-            // ✅ Drag & Drop reorder
             ->reorderable('sort_order')
             ->defaultSort('sort_order', 'asc')
 
@@ -91,13 +90,13 @@ class StockSourceTable
                     ->numeric()
                     ->sortable()
                     ->toggleable(),
-					
-				TextColumn::make('items_count')
+
+                TextColumn::make('items_count')
                     ->label('Товарів')
-                    ->counts('items')
+                    ->numeric()
                     ->sortable()
                     ->badge()
-                    ->color('success'),	
+                    ->color('success'),
 
                 TextColumn::make('updated_at')
                     ->label('Оновлено')
@@ -117,17 +116,18 @@ class StockSourceTable
                     EditAction::make(),
 
                     DeleteAction::make()
+                        // ✅ без N+1: використовуємо *_count
                         ->disabled(fn ($record) =>
                             (int) ($record->store_links_count ?? 0) > 0
                             || (int) ($record->locations_count ?? 0) > 0
-                            || $record->items()->exists()
+                            || (int) ($record->items_count ?? 0) > 0
                         )
                         ->tooltip(fn ($record) => (
                             (int) ($record->store_links_count ?? 0) > 0
                                 ? 'Неможливо видалити: джерело використовується в магазинах.'
                                 : ((int) ($record->locations_count ?? 0) > 0
                                     ? 'Неможливо видалити: у джерела є склади/локації.'
-                                    : ($record->items()->exists()
+                                    : ((int) ($record->items_count ?? 0) > 0
                                         ? 'Неможливо видалити: у джерелі є залишки (stock_items).'
                                         : null
                                     )
@@ -136,10 +136,8 @@ class StockSourceTable
                 ])->iconButton(),
             ])
 
-            // ✅ чекбокси + "Відкрити дії" як у CategoriesTable
             ->bulkActions([
                 BulkActionGroup::make([
-
                     BulkAction::make('activateSelected')
                         ->label('Зробити активними')
                         ->icon('heroicon-o-check-circle')
@@ -187,9 +185,9 @@ class StockSourceTable
                     DeleteBulkAction::make()
                         ->before(function (Collection $records, DeleteBulkAction $action) {
                             foreach ($records as $record) {
-                                $hasLinks = $record->storeLinks()->exists() || ((int) ($record->store_links_count ?? 0)) > 0;
-                                $hasLocations = $record->locations()->exists() || ((int) ($record->locations_count ?? 0)) > 0;
-                                $hasItems = $record->items()->exists();
+                                $hasLinks = ((int) ($record->store_links_count ?? 0)) > 0 || $record->storeLinks()->exists();
+                                $hasLocations = ((int) ($record->locations_count ?? 0)) > 0 || $record->locations()->exists();
+                                $hasItems = ((int) ($record->items_count ?? 0)) > 0 || $record->items()->exists();
 
                                 if ($hasLinks || $hasLocations || $hasItems) {
                                     Notification::make()
@@ -203,7 +201,6 @@ class StockSourceTable
                                 }
                             }
                         }),
-
                 ])->label('Відкрити дії'),
             ]);
     }

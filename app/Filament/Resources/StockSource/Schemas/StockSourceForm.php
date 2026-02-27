@@ -6,7 +6,6 @@ use App\Filament\Forms\Components\PhoneInput;
 use App\Models\Currency;
 use App\Models\StockSource;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -35,9 +34,7 @@ class StockSourceForm
                                         Section::make('Ідентифікація')
                                             ->columns(['default' => 1, 'md' => 2])
                                             ->schema([
-                                                Toggle::make('is_active')
-                                                    ->label('Активне')
-                                                    ->default(true),
+                                                Toggle::make('is_active')->label('Активне')->default(true),
 
                                                 TextInput::make('sort_order')
                                                     ->label('Сортування')
@@ -76,18 +73,38 @@ class StockSourceForm
                                                         ->orderBy('code')
                                                         ->pluck('code', 'code')
                                                         ->all()
-                                                    )
-                                                    ->helperText('Підставляється по замовчуванню в позиції складу (stock_items), але там можна змінити.'),
+                                                    ),
+                                            ]),
+
+                                        Section::make('Доставка за замовчуванням')
+                                            ->columns(['default' => 1, 'md' => 3])
+                                            ->schema([
+                                                Select::make('delivery_unit')
+                                                    ->label('Одиниці')
+                                                    ->native(false)
+                                                    ->options(StockSource::deliveryUnitOptions())
+                                                    ->default('days')
+                                                    ->required(),
+
+                                                TextInput::make('delivery_min')
+                                                    ->label('Від')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->placeholder('—')
+                                                    ->helperText('Число в обраних одиницях'),
+
+                                                TextInput::make('delivery_max')
+                                                    ->label('До')
+                                                    ->numeric()
+                                                    ->minValue(0)
+                                                    ->placeholder('—'),
                                             ]),
 
                                         Section::make('Контакти')
                                             ->columns(['default' => 1, 'md' => 2])
                                             ->schema([
                                                 TextInput::make('contact_name')->label('Контакт')->maxLength(255),
-
-                                                // ✅ як у UserForm — тільки через компонент
                                                 PhoneInput::make('phone')->label('Телефон'),
-
                                                 TextInput::make('email')->label('Email')->email()->maxLength(255),
                                                 TextInput::make('website_url')->label('Сайт')->url()->maxLength(255),
                                             ]),
@@ -96,24 +113,17 @@ class StockSourceForm
                                             ->columns(['default' => 1, 'md' => 2])
                                             ->schema([
                                                 TextInput::make('country')->label('Країна')->maxLength(100),
-                                                TextInput::make('region')->label('Область')->maxLength(100),
                                                 TextInput::make('city')->label('Місто')->maxLength(100),
-                                                TextInput::make('postal_code')->label('Індекс')->maxLength(20),
 
                                                 TextInput::make('address_line1')
-                                                    ->label('Адреса 1')->maxLength(255)->columnSpanFull(),
-                                                TextInput::make('address_line2')
-                                                    ->label('Адреса 2')->maxLength(255)->columnSpanFull(),
-
-                                                TextInput::make('lat')->label('Lat')->numeric(),
-                                                TextInput::make('lng')->label('Lng')->numeric(),
+                                                    ->label('Вулиця')
+                                                    ->maxLength(255)
+                                                    ->columnSpanFull(),
                                             ]),
 
-                                        Section::make('Налаштування')
-                                            ->schema([
-                                                KeyValue::make('settings')->label('settings'),
-                                                Textarea::make('note')->label('Примітка')->rows(3),
-                                            ]),
+                                        Section::make('Примітка')->schema([
+                                            Textarea::make('note')->label('Примітка')->rows(3),
+                                        ]),
                                     ]),
 
                                 Section::make('Опціонально')

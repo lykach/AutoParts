@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
@@ -30,7 +29,6 @@ class Product extends Model
 
         'tecdoc_id',
 
-        // ✅ UUID (nullable, задаємо вручну або через перемикач у формі)
         'uuid',
 
         // ✅ Доставка / габарити
@@ -39,13 +37,17 @@ class Product extends Model
         'width_cm',
         'height_cm',
 
+        // ✅ best offer
         'best_price_uah',
         'best_price_original',
         'best_currency_code',
         'best_stock_source_id',
         'best_stock_qty',
-        'best_delivery_days_min',
-        'best_delivery_days_max',
+
+        // ✅ нове best delivery (days/hours)
+        'best_delivery_unit',
+        'best_delivery_min',
+        'best_delivery_max',
     ];
 
     protected $casts = [
@@ -58,7 +60,6 @@ class Product extends Model
 
         'uuid' => 'string',
 
-        // ✅ Доставка / габарити
         'weight_kg' => 'decimal:3',
         'length_cm' => 'decimal:1',
         'width_cm'  => 'decimal:1',
@@ -68,8 +69,10 @@ class Product extends Model
         'best_price_original' => 'decimal:2',
         'best_stock_source_id' => 'integer',
         'best_stock_qty' => 'decimal:3',
-        'best_delivery_days_min' => 'integer',
-        'best_delivery_days_max' => 'integer',
+
+        'best_delivery_unit' => 'string',
+        'best_delivery_min' => 'integer',
+        'best_delivery_max' => 'integer',
     ];
 
     // -------------------
@@ -169,13 +172,11 @@ class Product extends Model
         return $this->hasOne(ProductImage::class)->where('is_primary', true);
     }
 
-    // ✅ НОВЕ: product_details (для картки товару)
     public function details(): HasMany
     {
         return $this->hasMany(ProductDetail::class)->orderBy('sort');
     }
 
-    // ✅ НОВЕ: product_characteristics (для фільтрів)
     public function characteristics(): HasMany
     {
         return $this->hasMany(ProductCharacteristic::class)->orderBy('sort');
@@ -187,9 +188,7 @@ class Product extends Model
     public static function normalizeArticle(?string $article): string
     {
         $s = trim((string) $article);
-        if ($s === '') {
-            return '';
-        }
+        if ($s === '') return '';
 
         $s = mb_strtoupper($s, 'UTF-8');
         $s = preg_replace('/[\s\-\.\_\/\\\\]+/u', '', $s) ?? $s;
@@ -209,9 +208,7 @@ class Product extends Model
 
     public static function buildDefaultSlug(?Manufacturer $manufacturer, ?string $articleNorm): string
     {
-        $brand = $manufacturer?->slug
-            ?: ($manufacturer?->name ? Str::slug($manufacturer->name) : '');
-
+        $brand = $manufacturer?->slug ?: ($manufacturer?->name ? Str::slug($manufacturer->name) : '');
         $art = strtolower(trim((string) $articleNorm));
 
         $base = trim($brand . '-' . $art, '-');
@@ -223,7 +220,6 @@ class Product extends Model
     protected static function booted(): void
     {
         static::saving(function (self $p) {
-            // ✅ article_raw: пробіли не чіпаємо, тільки uppercase
             if ($p->article_raw !== null) {
                 $p->article_raw = mb_strtoupper((string) $p->article_raw, 'UTF-8');
             }
@@ -232,7 +228,6 @@ class Product extends Model
                 $p->article_norm = self::normalizeArticle($p->article_raw);
             }
 
-            // ✅ Категорія повинна бути: active + leaf + NOT container
             if ($p->category_id) {
                 $ok = Category::query()
                     ->whereKey($p->category_id)
@@ -248,7 +243,6 @@ class Product extends Model
                 }
             }
 
-            // ✅ Габарити не можуть бути від’ємні
             foreach (['weight_kg', 'length_cm', 'width_cm', 'height_cm'] as $f) {
                 if ($p->{$f} !== null && (float) $p->{$f} < 0) {
                     throw ValidationException::withMessages([
@@ -256,8 +250,6 @@ class Product extends Model
                     ]);
                 }
             }
-
-            // ✅ UUID тут НЕ генеруємо (тільки вручну/через перемикач у формі)
         });
     }
 
@@ -267,7 +259,7 @@ class Product extends Model
     public function recalcBestOffer(): void
     {
         $items = $this->stockItems()
-            ->whereNotNull('price_sell')
+            ->whereNotNull('price_sell_uah') // вже перераховано в БД
             ->where('availability_status', '!=', 'discontinued')
             ->get();
 
@@ -275,14 +267,12 @@ class Product extends Model
         $bestUah = null;
 
         foreach ($items as $it) {
-            if ((float) $it->available_for_sale_qty <= 0) {
+            if ((float) ($it->sellable_qty ?? 0) <= 0) {
                 continue;
             }
 
             $uah = $it->price_sell_uah;
-            if ($uah === null) {
-                continue;
-            }
+            if ($uah === null) continue;
 
             if ($bestUah === null || (float) $uah < $bestUah) {
                 $bestUah = (float) $uah;
@@ -290,15 +280,16 @@ class Product extends Model
             }
         }
 
-        if (!$best) {
+        if (! $best) {
             $this->forceFill([
                 'best_price_uah' => null,
                 'best_price_original' => null,
                 'best_currency_code' => null,
                 'best_stock_source_id' => null,
                 'best_stock_qty' => null,
-                'best_delivery_days_min' => null,
-                'best_delivery_days_max' => null,
+                'best_delivery_unit' => null,
+                'best_delivery_min' => null,
+                'best_delivery_max' => null,
             ])->saveQuietly();
 
             return;
@@ -309,9 +300,11 @@ class Product extends Model
             'best_price_original' => $best->price_sell,
             'best_currency_code' => strtoupper((string) ($best->currency ?? 'UAH')),
             'best_stock_source_id' => $best->stock_source_id,
-            'best_stock_qty' => $best->available_for_sale_qty,
-            'best_delivery_days_min' => $best->delivery_days_min,
-            'best_delivery_days_max' => $best->delivery_days_max,
+            'best_stock_qty' => $best->sellable_qty,
+
+            'best_delivery_unit' => $best->delivery_unit ?: 'days',
+            'best_delivery_min' => $best->delivery_min,
+            'best_delivery_max' => $best->delivery_max,
         ])->saveQuietly();
     }
 

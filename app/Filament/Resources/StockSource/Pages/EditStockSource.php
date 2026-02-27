@@ -14,11 +14,22 @@ class EditStockSource extends EditRecord
     {
         return [
             DeleteAction::make()
-                ->disabled(fn () => $this->record?->storeLinks()->exists())
-                ->tooltip(fn () => $this->record?->storeLinks()->exists()
-                    ? 'Неможливо видалити: джерело використовується в магазинах.'
-                    : null
-                ),
+                ->disabled(fn () =>
+                    $this->record?->storeLinks()->exists()
+                    || $this->record?->locations()->exists()
+                    || $this->record?->items()->exists()
+                )
+                ->tooltip(fn () => (
+                    $this->record?->storeLinks()->exists()
+                        ? 'Неможливо видалити: джерело використовується в магазинах.'
+                        : ($this->record?->locations()->exists()
+                            ? 'Неможливо видалити: у джерела є склади/локації.'
+                            : ($this->record?->items()->exists()
+                                ? 'Неможливо видалити: у джерелі є залишки (stock_items).'
+                                : null
+                            )
+                        )
+                )),
         ];
     }
 }
