@@ -49,22 +49,16 @@ class StoreTable
                     ->label('Місто')
                     ->toggleable(),
 
-                // ✅ Основний телефон (як у UsersTable — формат + copy)
                 TextColumn::make('primary_phone')
                     ->label('Телефон')
                     ->state(function (Store $record): ?string {
                         $phones = is_array($record->phones) ? $record->phones : [];
+                        if (empty($phones)) return null;
 
-                        if (empty($phones)) {
-                            return null;
-                        }
-
-                        // primary first
                         $primary = collect($phones)->firstWhere('is_primary', true);
                         $first = $phones[0] ?? null;
 
                         $raw = $primary['number'] ?? ($first['number'] ?? null);
-
                         return $raw ? UkrainianPhone::format($raw) : null;
                     })
                     ->placeholder('—')
@@ -164,12 +158,27 @@ class StoreTable
                                 'payment_methods', 'delivery_methods', 'services',
                                 'pickup_instructions_uk', 'pickup_instructions_en', 'pickup_instructions_ru',
                                 'delivery_info_uk', 'delivery_info_en', 'delivery_info_ru',
+
+                                // ✅ SEO / Content
                                 'title_uk', 'title_en', 'title_ru',
                                 'description_uk', 'description_en', 'description_ru',
+
+                                'footer_title_uk', 'footer_title_en', 'footer_title_ru',
+                                'h1_uk', 'h1_en', 'h1_ru',
+
                                 'meta_title_uk', 'meta_title_en', 'meta_title_ru',
                                 'meta_description_uk', 'meta_description_en', 'meta_description_ru',
+                                'meta_keywords_uk', 'meta_keywords_en', 'meta_keywords_ru',
+
+                                'og_title_uk', 'og_title_en', 'og_title_ru',
+                                'og_description_uk', 'og_description_en', 'og_description_ru',
+                                'og_image',
+
                                 'canonical_url', 'robots', 'seo',
+
+                                // Legal
                                 'company_name', 'edrpou', 'vat', 'legal_address',
+
                                 'settings',
                             ];
 

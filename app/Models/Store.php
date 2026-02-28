@@ -37,7 +37,8 @@ class Store extends Model
         'messengers',
         'social_links',
 
-        'country',
+        // ✅ address text fields
+        'country_name',
         'region',
         'city',
         'address_line1',
@@ -56,23 +57,42 @@ class Store extends Model
         'logo',
         'cover_image',
 
+        // content
         'title_uk', 'title_en', 'title_ru',
         'description_uk', 'description_en', 'description_ru',
+
+        // footer/brand title
+        'footer_title_uk', 'footer_title_en', 'footer_title_ru',
+
+        // H1
+        'h1_uk', 'h1_en', 'h1_ru',
+
+        // meta
         'meta_title_uk', 'meta_title_en', 'meta_title_ru',
         'meta_description_uk', 'meta_description_en', 'meta_description_ru',
+        'meta_keywords_uk', 'meta_keywords_en', 'meta_keywords_ru',
+
         'canonical_url',
         'robots',
         'seo',
 
+        // OpenGraph
+        'og_title_uk', 'og_title_en', 'og_title_ru',
+        'og_description_uk', 'og_description_en', 'og_description_ru',
+        'og_image',
+
+        // legal
         'company_name',
         'edrpou',
         'vat',
         'legal_address',
 
+        // localization
         'timezone',
         'currency',
         'default_language',
 
+        // delivery/pickup
         'pickup_instructions_uk', 'pickup_instructions_en', 'pickup_instructions_ru',
         'delivery_info_uk', 'delivery_info_en', 'delivery_info_ru',
         'payment_methods',
@@ -120,6 +140,7 @@ class Store extends Model
         return $this->hasMany(Store::class, 'parent_id')->orderBy('sort_order');
     }
 
+    // ✅ relation для country_id (залишається)
     public function country(): BelongsTo
     {
         return $this->belongsTo(\App\Models\Country::class, 'country_id');
@@ -235,10 +256,21 @@ class Store extends Model
 
             'phones','additional_emails','messengers','social_links','email','website_url' => 'contacts',
 
+            // ✅ SEO group: full
             'title_uk','title_en','title_ru',
             'description_uk','description_en','description_ru',
+
+            'footer_title_uk','footer_title_en','footer_title_ru',
+            'h1_uk','h1_en','h1_ru',
+
             'meta_title_uk','meta_title_en','meta_title_ru',
             'meta_description_uk','meta_description_en','meta_description_ru',
+            'meta_keywords_uk','meta_keywords_en','meta_keywords_ru',
+
+            'og_title_uk','og_title_en','og_title_ru',
+            'og_description_uk','og_description_en','og_description_ru',
+            'og_image',
+
             'canonical_url','robots','seo' => 'seo',
 
             'company_name','edrpou','vat','legal_address' => 'legal',
@@ -300,13 +332,11 @@ class Store extends Model
                 $store->type = 'main';
                 $store->inherit_defaults = false;
 
-                // ✅ валюта/мова з default
                 $store->currency_id = \App\Models\Currency::query()->where('is_default', true)->value('id') ?? $store->currency_id;
                 $store->default_language = \App\Models\Language::query()->where('is_default', true)->value('code') ?? ($store->default_language ?: 'uk');
 
                 $store->timezone = $store->timezone ?: 'Europe/Kyiv';
 
-                // ✅ ОВЕРРАЙДИ ДЛЯ MAIN НЕ МАЮТЬ СЕНСУ — ПРИБИВАЄМО
                 $settings = is_array($store->settings) ? $store->settings : [];
                 $settings['overrides'] = [];
                 $store->settings = $settings;
