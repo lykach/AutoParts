@@ -3,12 +3,16 @@
 namespace App\Filament\Resources\StoreStockSources\Tables;
 
 use App\Models\Store;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Notifications\Notification;
 use Filament\Tables;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Collection;
 
 class StoreStockSourcesTable
 {
@@ -25,7 +29,6 @@ class StoreStockSourcesTable
                     })
                     ->wrap()
                     ->searchable(query: function ($query, string $search) {
-                        // ✅ без join-ів: пошук через whereHas
                         return $query->whereHas('store', fn ($q) => $q->where('name_uk', 'like', "%{$search}%"));
                     }),
 
@@ -48,7 +51,7 @@ class StoreStockSourcesTable
                     ->searchable(query: function ($query, string $search) {
                         return $query->whereHas('location', function ($q) use ($search) {
                             $q->where('name', 'like', "%{$search}%")
-                              ->orWhere('city', 'like', "%{$search}%");
+                                ->orWhere('city', 'like', "%{$search}%");
                         });
                     }),
 
@@ -85,7 +88,48 @@ class StoreStockSourcesTable
                 DeleteAction::make(),
             ])
             ->bulkActions([
-                DeleteBulkAction::make(),
+                BulkActionGroup::make([
+                    BulkAction::make('setActive')
+                        ->label('Зробити активними')
+                        ->icon('heroicon-o-check-circle')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records) {
+                            $records->each(function ($record) {
+                                $record->is_active = true;
+                                $record->save();
+                            });
+
+                            Notification::make()
+                                ->title('Готово')
+                                ->body('Вибрані записи зроблено активними.')
+                                ->success()
+                                ->send();
+                        }),
+
+                    BulkAction::make('setInactive')
+                        ->label('Зробити неактивними')
+                        ->icon('heroicon-o-x-circle')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records) {
+                            $records->each(function ($record) {
+                                $record->is_active = false;
+                                $record->save();
+                            });
+
+                            Notification::make()
+                                ->title('Готово')
+                                ->body('Вибрані записи зроблено неактивними.')
+                                ->success()
+                                ->send();
+                        }),
+
+                    DeleteBulkAction::make()
+                        ->label('Видалити вибране')
+                        ->icon('heroicon-o-trash')
+                        ->requiresConfirmation(),
+                ])
+                    ->label('Відкрити дії')
+                    ->icon('heroicon-o-ellipsis-vertical'),
             ])
             ->defaultSort('priority', 'asc')
             ->emptyStateHeading('Підключених складів ще немає')

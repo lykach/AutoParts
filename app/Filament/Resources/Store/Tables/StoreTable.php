@@ -8,6 +8,8 @@ use App\Models\Store;
 use App\Rules\UkrainianPhone;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
@@ -17,6 +19,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class StoreTable
 {
@@ -159,7 +162,6 @@ class StoreTable
                                 'pickup_instructions_uk', 'pickup_instructions_en', 'pickup_instructions_ru',
                                 'delivery_info_uk', 'delivery_info_en', 'delivery_info_ru',
 
-                                // ✅ SEO / Content
                                 'title_uk', 'title_en', 'title_ru',
                                 'description_uk', 'description_en', 'description_ru',
 
@@ -176,9 +178,7 @@ class StoreTable
 
                                 'canonical_url', 'robots', 'seo',
 
-                                // Legal
                                 'company_name', 'edrpou', 'vat', 'legal_address',
-
                                 'settings',
                             ];
 
@@ -211,7 +211,48 @@ class StoreTable
                 ])->iconButton(),
             ])
             ->bulkActions([
-                DeleteBulkAction::make(),
+                BulkActionGroup::make([
+                    BulkAction::make('setActive')
+                        ->label('Зробити активними')
+                        ->icon('heroicon-o-check-circle')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records) {
+                            $records->each(function (Store $record) {
+                                $record->is_active = true;
+                                $record->save();
+                            });
+
+                            Notification::make()
+                                ->title('Готово')
+                                ->body('Вибрані магазини зроблено активними.')
+                                ->success()
+                                ->send();
+                        }),
+
+                    BulkAction::make('setInactive')
+                        ->label('Зробити неактивними')
+                        ->icon('heroicon-o-x-circle')
+                        ->requiresConfirmation()
+                        ->action(function (Collection $records) {
+                            $records->each(function (Store $record) {
+                                $record->is_active = false;
+                                $record->save();
+                            });
+
+                            Notification::make()
+                                ->title('Готово')
+                                ->body('Вибрані магазини зроблено неактивними.')
+                                ->success()
+                                ->send();
+                        }),
+
+                    DeleteBulkAction::make()
+                        ->label('Видалити вибране')
+                        ->icon('heroicon-o-trash')
+                        ->requiresConfirmation(),
+                ])
+                    ->label('Відкрити дії')
+                    ->icon('heroicon-o-ellipsis-vertical'),
             ])
             ->defaultSort('sort_order', 'asc');
     }
