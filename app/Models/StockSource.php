@@ -19,8 +19,7 @@ class StockSource extends Model
 
         'default_currency_code',
 
-        // ✅ дефолтна доставка
-        'delivery_unit', // days|hours
+        'delivery_unit',
         'delivery_min',
         'delivery_max',
 
@@ -31,7 +30,7 @@ class StockSource extends Model
 
         'country',
         'city',
-        'address_line1', // UI: "Вулиця"
+        'address_line1',
 
         'settings',
         'note',
@@ -58,18 +57,12 @@ class StockSource extends Model
     {
         return $this->belongsToMany(Store::class, 'store_stock_sources', 'stock_source_id', 'store_id')
             ->withPivot([
+                'stock_source_location_id',
                 'is_active',
                 'priority',
-                'markup_percent',
-                'min_delivery_days',
-                'max_delivery_days',
-                'lead_time_days',
-                'cutoff_time',
-                'pickup_available',
-                'price_multiplier',
-                'extra_fee',
-                'min_order_amount',
-                'coverage',
+                'delivery_unit',
+                'delivery_min',
+                'delivery_max',
                 'settings',
                 'note',
             ])
@@ -112,7 +105,6 @@ class StockSource extends Model
                 ? Str::upper(trim((string) $s->default_currency_code))
                 : 'UAH';
 
-            // ✅ доставка дефолт: days|hours
             $unit = strtolower(trim((string) ($s->delivery_unit ?? 'days')));
             $s->delivery_unit = in_array($unit, ['days', 'hours'], true) ? $unit : 'days';
 

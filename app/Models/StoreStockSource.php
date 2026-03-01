@@ -13,40 +13,32 @@ class StoreStockSource extends Model
     protected $fillable = [
         'store_id',
         'stock_source_id',
+        'stock_source_location_id',   // ✅ ВАЖЛИВО
+
         'is_active',
         'priority',
 
-        // ✅ new
-        'markup_percent',
-        'min_delivery_days',
-        'max_delivery_days',
+        // лишаємо поки що (можливо використаємо пізніше/або прибереш міграцією)
+        'delivery_unit',
+        'delivery_min',
+        'delivery_max',
 
-        // existing
-        'lead_time_days',
-        'cutoff_time',
-        'pickup_available',
-        'price_multiplier',
-        'extra_fee',
-        'min_order_amount',
-        'coverage',
         'settings',
         'note',
     ];
 
     protected $casts = [
+        'store_id' => 'integer',
+        'stock_source_id' => 'integer',
+        'stock_source_location_id' => 'integer', // ✅ ВАЖЛИВО
+
         'is_active' => 'boolean',
         'priority' => 'integer',
 
-        'markup_percent' => 'decimal:2',
-        'min_delivery_days' => 'integer',
-        'max_delivery_days' => 'integer',
+        'delivery_unit' => 'string',
+        'delivery_min' => 'integer',
+        'delivery_max' => 'integer',
 
-        'lead_time_days' => 'integer',
-        'pickup_available' => 'boolean',
-        'price_multiplier' => 'decimal:4',
-        'extra_fee' => 'decimal:2',
-        'min_order_amount' => 'decimal:2',
-        'coverage' => 'array',
         'settings' => 'array',
     ];
 
@@ -60,8 +52,35 @@ class StoreStockSource extends Model
         return $this->belongsTo(StockSource::class, 'stock_source_id');
     }
 
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(StockSourceLocation::class, 'stock_source_location_id');
+    }
+
     public function scopeActive(Builder $q): Builder
     {
         return $q->where('is_active', true);
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (self $row) {
+            // ✅ Автопідстановка stock_source_id по location (надійність)
+            if (filled($row->stock_source_location_id)) {
+                $srcId = StockSourceLocation::query()
+                    ->whereKey($row->stock_source_location_id)
+                    ->value('stock_source_id');
+
+                if ($srcId) {
+                    $row->stock_source_id = (int) $srcId;
+                }
+            }
+
+            // Мінімальна нормалізація
+            $row->priority = filled($row->priority) ? (int) $row->priority : 100;
+
+            $row->settings = is_array($row->settings) ? $row->settings : [];
+            $row->note = $row->note ? trim((string) $row->note) : null;
+        });
     }
 }

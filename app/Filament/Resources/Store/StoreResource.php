@@ -26,7 +26,6 @@ class StoreResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'display_name';
 
-    // ✅ Робимо контент на всю ширину (прибирає “вузьке” відображення)
     public static function getMaxContentWidth(): ?string
     {
         return 'full';
@@ -40,6 +39,15 @@ class StoreResource extends Resource
     public static function table(Table $table): Table
     {
         return StoreTable::configure($table);
+    }
+
+    /**
+     * ✅ ВАЖЛИВО:
+     * Прибрали RelationManagers повністю (Склади/Наявність тепер НЕ тут).
+     */
+    public static function getRelations(): array
+    {
+        return [];
     }
 
     public static function getPages(): array

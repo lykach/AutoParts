@@ -20,20 +20,6 @@ use Illuminate\Support\Str;
 
 class StoreForm
 {
-    protected static function normalizeStockSourcePriorities($state): array
-    {
-        if (! is_array($state)) return [];
-
-        $pos = 1;
-        foreach ($state as $key => $row) {
-            if (! is_array($row)) continue;
-            $state[$key]['priority'] = $pos * 10;
-            $pos++;
-        }
-
-        return $state;
-    }
-
     protected static function cleanAdditionalLocalization(array $state): array
     {
         $mainCurrencyId = $state['currency_id'] ?? null;
@@ -93,6 +79,7 @@ class StoreForm
                 Tabs::make('StoreTabs')
                     ->contained(false)
                     ->tabs([
+
                         // =====================================================
                         // ОСНОВНЕ
                         // =====================================================
@@ -101,6 +88,7 @@ class StoreForm
                                 Grid::make(1)
                                     ->columnSpan(['default' => 1, 'lg' => 2])
                                     ->schema([
+
                                         Section::make('Ідентифікація')
                                             ->columns(['default' => 1, 'md' => 2])
                                             ->schema([
@@ -182,10 +170,12 @@ class StoreForm
                                             ->dehydrated(fn ($get) => ! (bool) $get('is_main'))
                                             ->schema([
                                                 Toggle::make('settings.overrides.working_hours')->label('Свій графік')->default(false),
-                                                Toggle::make('settings.overrides.delivery')->label('Своя доставка/оплата')->default(false),
                                                 Toggle::make('settings.overrides.contacts')->label('Свої контакти')->default(false),
                                                 Toggle::make('settings.overrides.seo')->label('Своє SEO')->default(false),
                                                 Toggle::make('settings.overrides.legal')->label('Свої юридичні')->default(false),
+
+                                                // ✅ залишаємо ключі, щоб не ламати логіку/дані
+                                                Toggle::make('settings.overrides.delivery')->label('Своя доставка/оплата')->default(false),
                                                 Toggle::make('settings.overrides.stock_sources')->label('Свої склади')->default(false),
                                             ]),
 
@@ -360,135 +350,45 @@ class StoreForm
                         ]),
 
                         // =====================================================
-                        // SEO (IDEAL)
+                        // SEO
                         // =====================================================
                         Tab::make('SEO')->schema([
                             static::inheritedNotice('seo'),
 
                             Section::make('SEO: Базові мета-теги')
-                                ->description('Meta Title/Description — важливо для Google. Keywords — не критично для Google, але можна для інших систем.')
                                 ->columns(['default' => 1, 'md' => 3])
                                 ->schema([
-                                    TextInput::make('footer_title_uk')
-                                        ->label('Назва в підвалі / бренд (uk)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Те, що показується як бренд у футері та може використовуватись в шаблонах meta.'),
+                                    TextInput::make('footer_title_uk')->label('Назва в підвалі / бренд (uk)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('footer_title_en')->label('Назва в підвалі / бренд (en)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('footer_title_ru')->label('Назва в підвалі / бренд (ru)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
-                                    TextInput::make('footer_title_en')
-                                        ->label('Назва в підвалі / бренд (en)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('h1_uk')->label('H1 (uk)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('h1_en')->label('H1 (en)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('h1_ru')->label('H1 (ru)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
-                                    TextInput::make('footer_title_ru')
-                                        ->label('Назва в підвалі / бренд (ru)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_title_uk')->label('Meta title (uk)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_title_en')->label('Meta title (en)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_title_ru')->label('Meta title (ru)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
-                                    TextInput::make('h1_uk')
-                                        ->label('H1 (uk)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('H1 на сторінці магазину (дуже впливає на SEO).'),
+                                    Textarea::make('meta_description_uk')->label('Meta description (uk)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Textarea::make('meta_description_en')->label('Meta description (en)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Textarea::make('meta_description_ru')->label('Meta description (ru)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
-                                    TextInput::make('h1_en')
-                                        ->label('H1 (en)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('h1_ru')
-                                        ->label('H1 (ru)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('meta_title_uk')
-                                        ->label('Meta title (uk)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Рекомендовано ~50–60 символів.'),
-
-                                    TextInput::make('meta_title_en')
-                                        ->label('Meta title (en)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('meta_title_ru')
-                                        ->label('Meta title (ru)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    Textarea::make('meta_description_uk')
-                                        ->label('Meta description (uk)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Рекомендовано ~120–160 символів (не більше ~300).'),
-
-                                    Textarea::make('meta_description_en')
-                                        ->label('Meta description (en)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    Textarea::make('meta_description_ru')
-                                        ->label('Meta description (ru)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('meta_keywords_uk')
-                                        ->label('Meta keywords (uk)')
-                                        ->maxLength(500)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Не ключове для Google. Формат: "ключ1, ключ2, ключ3".'),
-
-                                    TextInput::make('meta_keywords_en')
-                                        ->label('Meta keywords (en)')
-                                        ->maxLength(500)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('meta_keywords_ru')
-                                        ->label('Meta keywords (ru)')
-                                        ->maxLength(500)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_keywords_uk')->label('Meta keywords (uk)')->maxLength(500)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_keywords_en')->label('Meta keywords (en)')->maxLength(500)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('meta_keywords_ru')->label('Meta keywords (ru)')->maxLength(500)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
                                 ]),
 
                             Section::make('SEO: Соцмережі (OpenGraph)')
-                                ->description('Використовується для превʼю в Telegram/Facebook тощо. Якщо пусто — можна на фронті підставляти meta title/description.')
                                 ->columns(['default' => 1, 'md' => 3])
                                 ->schema([
-                                    TextInput::make('og_title_uk')
-                                        ->label('OG title (uk)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('og_title_uk')->label('OG title (uk)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('og_title_en')->label('OG title (en)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    TextInput::make('og_title_ru')->label('OG title (ru)')->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
-                                    TextInput::make('og_title_en')
-                                        ->label('OG title (en)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    TextInput::make('og_title_ru')
-                                        ->label('OG title (ru)')
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    Textarea::make('og_description_uk')
-                                        ->label('OG description (uk)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    Textarea::make('og_description_en')
-                                        ->label('OG description (en)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
-
-                                    Textarea::make('og_description_ru')
-                                        ->label('OG description (ru)')
-                                        ->rows(3)
-                                        ->maxLength(320)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Textarea::make('og_description_uk')->label('OG description (uk)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Textarea::make('og_description_en')->label('OG description (en)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Textarea::make('og_description_ru')->label('OG description (ru)')->rows(3)->maxLength(320)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
 
                                     FileUpload::make('og_image')
                                         ->label('OG image (1200x630 рекомендовано)')
@@ -505,32 +405,19 @@ class StoreForm
                             Section::make('SEO: Технічні налаштування')
                                 ->columns(['default' => 1, 'md' => 2])
                                 ->schema([
-                                    TextInput::make('canonical_url')
-                                        ->label('Canonical URL')
-                                        ->url()
-                                        ->maxLength(255)
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Якщо пусто — на фронті можна ставити поточний URL як canonical.'),
-
-                                    Select::make('robots')
-                                        ->label('Robots')
-                                        ->options([
-                                            null => 'За замовчуванням',
-                                            'index,follow' => 'index,follow',
-                                            'noindex,follow' => 'noindex,follow',
-                                            'index,nofollow' => 'index,nofollow',
-                                            'noindex,nofollow' => 'noindex,nofollow',
-                                        ])
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo'))
-                                        ->helperText('Для тестових/службових сторінок — noindex.'),
+                                    TextInput::make('canonical_url')->label('Canonical URL')->url()->maxLength(255)->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    Select::make('robots')->label('Robots')->options([
+                                        null => 'За замовчуванням',
+                                        'index,follow' => 'index,follow',
+                                        'noindex,follow' => 'noindex,follow',
+                                        'index,nofollow' => 'index,nofollow',
+                                        'noindex,nofollow' => 'noindex,nofollow',
+                                    ])->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
                                 ]),
 
                             Section::make('SEO: Schema / JSON (advanced)')
-                                ->description('Тут можна зберігати schema.org LocalBusiness, geo, openingHours, додаткові правила.')
                                 ->schema([
-                                    KeyValue::make('seo')
-                                        ->label('seo (JSON)')
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
+                                    KeyValue::make('seo')->label('seo (JSON)')->disabled(fn ($get) => $disabledIfInherited($get, 'seo')),
                                 ]),
                         ]),
 
@@ -674,139 +561,6 @@ class StoreForm
                                         KeyValue::make('settings.extra')->label('settings.extra'),
                                     ]),
                             ]),
-                        ]),
-
-                        // =====================================================
-                        // Склади / Наявність
-                        // =====================================================
-                        Tab::make('Склади/Наявність')->schema([
-                            static::inheritedNotice('stock_sources'),
-
-                            Section::make('Джерела наявності для цього магазину')
-                                ->description('Пріоритет: 10/20/30… (перераховується автоматично перед збереженням і для UX при зміні).')
-                                ->schema([
-                                    Repeater::make('stockSourceLinks')
-                                        ->label('Склади / джерела')
-                                        ->relationship('stockSourceLinks')
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'stock_sources'))
-                                        ->defaultItems(0)
-                                        ->reorderable()
-                                        ->collapsible()
-                                        ->mutateDehydratedStateUsing(fn ($state) => static::normalizeStockSourcePriorities($state))
-                                        ->afterStateUpdated(function ($state, $set) {
-                                            if (! is_array($state)) return;
-
-                                            $normalized = static::normalizeStockSourcePriorities($state);
-                                            if ($normalized !== $state) {
-                                                $set('stockSourceLinks', $normalized);
-                                            }
-                                        })
-                                        ->schema([
-                                            Grid::make(['default' => 1, 'md' => 4])->schema([
-                                                Select::make('stock_source_id')
-                                                    ->label('Джерело')
-                                                    ->required()
-                                                    ->searchable()
-                                                    ->preload()
-                                                    ->options(fn () => \App\Models\StockSource::query()
-                                                        ->where('is_active', true)
-                                                        ->orderBy('sort_order')
-                                                        ->pluck('name', 'id')
-                                                        ->all()
-                                                    ),
-
-                                                Toggle::make('is_active')->label('Активно')->default(true),
-
-                                                TextInput::make('priority')
-                                                    ->label('Пріоритет')
-                                                    ->numeric()
-                                                    ->default(100)
-                                                    ->helperText('Авто: 10/20/30… (менше = важливіше).'),
-
-                                                Toggle::make('pickup_available')->label('Самовивіз')->default(false),
-                                            ]),
-
-                                            Grid::make(['default' => 1, 'md' => 4])->schema([
-                                                TextInput::make('min_delivery_days')->label('Доставка (мін. днів)')->numeric()->minValue(0)->maxValue(365)->placeholder('0'),
-
-                                                TextInput::make('max_delivery_days')
-                                                    ->label('Доставка (макс. днів)')
-                                                    ->numeric()
-                                                    ->minValue(0)
-                                                    ->maxValue(365)
-                                                    ->placeholder('3')
-                                                    ->rule(function ($get) {
-                                                        $min = $get('min_delivery_days');
-                                                        if ($min === null || $min === '') return null;
-                                                        return 'gte:min_delivery_days';
-                                                    })
-                                                    ->helperText('Максимум має бути ≥ мінімуму.'),
-
-                                                TextInput::make('markup_percent')->label('Націнка (%)')->numeric()->minValue(0)->maxValue(9999.99)->placeholder('0')->suffix('%'),
-
-                                                TextInput::make('lead_time_days')->label('Lead time (дні)')->numeric()->minValue(0)->maxValue(365)->placeholder('0-14'),
-                                            ]),
-
-                                            Grid::make(['default' => 1, 'md' => 4])->schema([
-                                                TextInput::make('cutoff_time')
-                                                    ->label('Cutoff (HH:MM)')
-                                                    ->mask('99:99')
-                                                    ->maxLength(5)
-                                                    ->placeholder('16:00')
-                                                    ->rule('regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/')
-                                                    ->helperText('Формат 00:00–23:59'),
-
-                                                TextInput::make('price_multiplier')->label('Множник ціни')->numeric()->minValue(0)->placeholder('1.0000')->helperText('1.05 = +5% поверх базової'),
-
-                                                TextInput::make('extra_fee')->label('Дод. збір')->numeric()->minValue(0)->placeholder('0.00'),
-
-                                                TextInput::make('min_order_amount')->label('Мін. сума')->numeric()->minValue(0)->placeholder('0.00'),
-                                            ]),
-
-                                            Grid::make(['default' => 1, 'md' => 2])->schema([
-                                                TextInput::make('note')->label('Примітка')->maxLength(255),
-                                                KeyValue::make('settings')->label('settings')->helperText('Дрібні параметри (API codes, правила, винятки).'),
-                                            ]),
-                                        ]),
-                                ]),
-                        ]),
-
-                        // =====================================================
-                        // Доставка
-                        // =====================================================
-                        Tab::make('Доставка')->schema([
-                            static::inheritedNotice('delivery'),
-
-                            Section::make('Методи оплати / доставки / послуги')
-                                ->schema([
-                                    Repeater::make('payment_methods')
-                                        ->label('Методи оплати')
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'delivery'))
-                                        ->defaultItems(0)
-                                        ->schema([
-                                            Grid::make(['default' => 1, 'md' => 3])->schema([
-                                                TextInput::make('code')->label('Code')->maxLength(50),
-                                                TextInput::make('title')->label('Назва')->maxLength(255)->required(),
-                                                Toggle::make('is_active')->label('Активно')->default(true),
-                                            ]),
-                                        ])
-                                        ->reorderable()
-                                        ->collapsible(),
-
-                                    Repeater::make('delivery_methods')
-                                        ->label('Методи доставки')
-                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'delivery'))
-                                        ->defaultItems(0)
-                                        ->schema([
-                                            Grid::make(['default' => 1, 'md' => 3])->schema([
-                                                TextInput::make('code')->label('Code')->maxLength(50),
-                                                TextInput::make('title')->label('Назва')->maxLength(255)->required(),
-                                                Toggle::make('is_active')->label('Активно')->default(true),
-                                            ]),
-                                        ])
-                                        ->reorderable()
-                                        ->collapsible(),
-                                ]),
                         ]),
                     ])
                     ->mutateDehydratedStateUsing(fn (array $state) => static::cleanAdditionalLocalization($state)),

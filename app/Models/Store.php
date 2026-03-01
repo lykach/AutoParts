@@ -140,7 +140,6 @@ class Store extends Model
         return $this->hasMany(Store::class, 'parent_id')->orderBy('sort_order');
     }
 
-    // ✅ relation для country_id (залишається)
     public function country(): BelongsTo
     {
         return $this->belongsTo(\App\Models\Country::class, 'country_id');
@@ -154,26 +153,24 @@ class Store extends Model
     public function stockSourceLinks(): HasMany
     {
         return $this->hasMany(\App\Models\StoreStockSource::class, 'store_id')
+            ->with(['stockSource', 'location'])
             ->orderBy('priority')
             ->orderBy('id');
     }
 
+    /**
+     * Optional legacy relation: keep it for convenience, but pivot fields are now minimal.
+     */
     public function stockSources(): BelongsToMany
     {
         return $this->belongsToMany(\App\Models\StockSource::class, 'store_stock_sources', 'store_id', 'stock_source_id')
             ->withPivot([
+                'stock_source_location_id',
                 'is_active',
                 'priority',
-                'markup_percent',
-                'min_delivery_days',
-                'max_delivery_days',
-                'lead_time_days',
-                'cutoff_time',
-                'pickup_available',
-                'price_multiplier',
-                'extra_fee',
-                'min_order_amount',
-                'coverage',
+                'delivery_unit',
+                'delivery_min',
+                'delivery_max',
                 'settings',
                 'note',
             ])
@@ -256,7 +253,6 @@ class Store extends Model
 
             'phones','additional_emails','messengers','social_links','email','website_url' => 'contacts',
 
-            // ✅ SEO group: full
             'title_uk','title_en','title_ru',
             'description_uk','description_en','description_ru',
 
@@ -350,6 +346,20 @@ class Store extends Model
             $store->website_url = $store->website_url ? trim($store->website_url) : null;
             $store->google_maps_url = $store->google_maps_url ? trim($store->google_maps_url) : null;
             $store->canonical_url = $store->canonical_url ? trim($store->canonical_url) : null;
+
+            if (! empty($store->country_id) && (blank($store->country_name) || $store->isDirty('country_id'))) {
+                $name = \App\Models\Country::query()
+                    ->whereKey($store->country_id)
+                    ->value('name_uk');
+
+                if ($name) {
+                    $store->country_name = $name;
+                }
+            }
+
+            if (empty($store->country_id) && $store->isDirty('country_id')) {
+                $store->country_name = null;
+            }
 
             if ($store->lat !== null) {
                 $lat = (float) $store->lat;
