@@ -31,10 +31,6 @@ class StockItem extends Model
         'delivery_min',
         'delivery_max',
 
-        // legacy (не чіпаємо, але UI не використовуємо)
-        'delivery_days_min',
-        'delivery_days_max',
-
         'source_updated_at',
         'meta',
     ];
@@ -61,9 +57,6 @@ class StockItem extends Model
         'delivery_unit' => 'string',
         'delivery_min' => 'integer',
         'delivery_max' => 'integer',
-
-        'delivery_days_min' => 'integer',
-        'delivery_days_max' => 'integer',
 
         'source_updated_at' => 'datetime',
         'meta' => 'array',
