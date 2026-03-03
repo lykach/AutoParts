@@ -24,7 +24,7 @@ class StoreResource extends Resource
     protected static ?string $modelLabel = 'магазин';
     protected static ?string $pluralModelLabel = 'магазини';
 
-    protected static ?string $recordTitleAttribute = 'display_name';
+    protected static ?string $recordTitleAttribute = 'name_uk';
 
     public static function getMaxContentWidth(): ?string
     {
