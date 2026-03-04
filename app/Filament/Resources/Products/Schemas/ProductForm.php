@@ -150,6 +150,29 @@ class ProductForm
                                 ])
                                 ->columns(2),
                         ]),
+
+                    // ✅ НОВА ВКЛАДКА ПІСЛЯ UUID
+                    Tab::make('УКТЗЕД')
+                        ->schema([
+                            Section::make('Код УКТЗЕД')
+                                ->description('Зазвичай 10 цифр. Поле необов’язкове.')
+                                ->schema([
+                                    TextInput::make('uktzed_code')
+                                        ->label('Код УКТЗЕД')
+                                        ->maxLength(20)
+                                        ->placeholder('Напр. 8708999790')
+                                        ->helperText('Допускаємо 4–10 цифр (без пробілів).')
+                                        ->rules([
+                                            'nullable',
+                                            'regex:/^\d{4,10}$/',
+                                        ])
+                                        ->extraInputAttributes([
+                                            'inputmode' => 'numeric',
+                                            'pattern' => '\d*',
+                                        ]),
+                                ])
+                                ->columns(2),
+                        ]),
                 ]),
         ]);
     }

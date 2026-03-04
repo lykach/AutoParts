@@ -64,6 +64,18 @@ class EditProduct extends EditRecord
             $data['article_raw'] = mb_strtoupper((string) $data['article_raw'], 'UTF-8');
         }
 
+        // ✅ УКТЗЕД: прибрати пробіли, пусте => НЕ перезаписуємо в NULL
+        if (array_key_exists('uktzed_code', $data)) {
+            $code = preg_replace('/\s+/', '', (string) $data['uktzed_code']);
+            $code = trim((string) $code);
+
+            if ($code === '') {
+                unset($data['uktzed_code']);
+            } else {
+                $data['uktzed_code'] = $code;
+            }
+        }
+
         // ✅ UUID toggle
         $uuidAuto = (bool) ($data['uuid_auto'] ?? false);
         unset($data['uuid_auto']);

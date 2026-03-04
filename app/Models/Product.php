@@ -31,6 +31,9 @@ class Product extends Model
 
         'uuid',
 
+        // ✅ УКТЗЕД
+        'uktzed_code',
+
         // ✅ Доставка / габарити
         'weight_kg',
         'length_cm',
@@ -59,6 +62,9 @@ class Product extends Model
         'tecdoc_id' => 'integer',
 
         'uuid' => 'string',
+
+        // ✅ УКТЗЕД
+        'uktzed_code' => 'string',
 
         'weight_kg' => 'decimal:3',
         'length_cm' => 'decimal:1',
@@ -249,6 +255,13 @@ class Product extends Model
                         $f => 'Значення не може бути від’ємним.',
                     ]);
                 }
+            }
+
+            // ✅ УКТЗЕД: прибрати пробіли (якщо хтось вставить "8708 99 97 90")
+            if ($p->uktzed_code !== null) {
+                $clean = preg_replace('/\s+/', '', (string) $p->uktzed_code);
+                $clean = trim((string) $clean);
+                $p->uktzed_code = $clean !== '' ? $clean : null;
             }
         });
     }

@@ -22,6 +22,18 @@ class CreateProduct extends CreateRecord
             $data['article_raw'] = mb_strtoupper((string) $data['article_raw'], 'UTF-8');
         }
 
+        // ✅ УКТЗЕД: прибрати пробіли, пусте => NULL (не пишемо в БД)
+        if (array_key_exists('uktzed_code', $data)) {
+            $code = preg_replace('/\s+/', '', (string) $data['uktzed_code']);
+            $code = trim((string) $code);
+
+            if ($code === '') {
+                unset($data['uktzed_code']);
+            } else {
+                $data['uktzed_code'] = $code;
+            }
+        }
+
         // ✅ UUID: якщо uuid_auto=1 і uuid порожній — генеруємо
         $uuidAuto = (bool) ($data['uuid_auto'] ?? false);
         unset($data['uuid_auto']); // цього поля в БД нема

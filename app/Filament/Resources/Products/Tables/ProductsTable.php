@@ -58,6 +58,7 @@ class ProductsTable
                         return $query->where(function (Builder $q) use ($s) {
                             $q->where('article_raw', 'like', "%{$s}%")
                                 ->orWhere('article_norm', 'like', "%{$s}%")
+                                ->orWhere('uktzed_code', 'like', "%{$s}%")
                                 ->orWhereHas('translations', fn (Builder $t) => $t->where('name', 'like', "%{$s}%"));
                         });
                     })
@@ -70,6 +71,15 @@ class ProductsTable
                     ->copyable()
                     ->copyMessage('Артикул скопійовано')
                     ->toggleable(),
+
+                // ✅ НОВЕ: УКТЗЕД
+                TextColumn::make('uktzed_code')
+                    ->label('УКТЗЕД')
+                    ->placeholder('—')
+                    ->searchable()
+                    ->copyable()
+                    ->copyMessage('УКТЗЕД скопійовано')
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('manufacturer.name')
                     ->label('Виробник')
@@ -139,6 +149,16 @@ class ProductsTable
                 Filter::make('no_stock')
                     ->label('Без залишку')
                     ->query(fn (Builder $q) => $q->whereNull('best_stock_qty')->orWhere('best_stock_qty', '<=', 0)),
+
+                // ✅ НОВЕ: фільтр "Є УКТЗЕД"
+                Filter::make('has_uktzed')
+                    ->label('Є УКТЗЕД')
+                    ->query(fn (Builder $q) => $q->whereNotNull('uktzed_code')->where('uktzed_code', '!=', '')),
+
+                // ✅ НОВЕ: фільтр "Без УКТЗЕД"
+                Filter::make('no_uktzed')
+                    ->label('Без УКТЗЕД')
+                    ->query(fn (Builder $q) => $q->whereNull('uktzed_code')->orWhere('uktzed_code', '=', '')),
             ])
             ->recordActions([
                 ActionGroup::make([
