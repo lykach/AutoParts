@@ -9,10 +9,10 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Schemas\Schema;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Schema;
 use Illuminate\Validation\Rule;
 
 class ProductForm
@@ -33,12 +33,13 @@ class ProductForm
                                         ->query(
                                             fn () => Category::query()
                                                 ->where('is_active', 1)
+                                                ->orderByRaw('CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END')
                                                 ->orderBy('parent_id')
-                                                ->orderBy('order'),
+                                                ->orderBy('order')
+                                                ->orderBy('id'),
                                             'name_uk',
                                             'parent_id'
                                         )
-                                        ->parentNullValue(-1)
                                         ->searchable()
                                         ->storeResults()
                                         ->disabledOptions(fn () => self::disabledCategoryIds())
@@ -63,13 +64,9 @@ class ProductForm
                                         ->maxLength(128)
                                         ->live()
                                         ->afterStateUpdated(function ($state, callable $set) {
-                                            // ✅ пробіли зберігаємо, але робимо uppercase прямо в полі
                                             $upper = mb_strtoupper((string) $state, 'UTF-8');
 
-                                            // повертаємо значення назад у поле
                                             $set('article_raw', $upper);
-
-                                            // генеруємо очищений артикул для пошуку
                                             $set('article_norm', Product::normalizeArticle($upper));
                                         })
                                         ->helperText('Пробіли зберігаються. Для пошуку використовується "очищений" артикул.'),
@@ -89,9 +86,17 @@ class ProductForm
 
                     Tab::make('Переклади')
                         ->schema([
-                            Section::make('UK')->schema(self::translationFields('uk'))->columns(2),
-                            Section::make('EN')->schema(self::translationFields('en'))->columns(2),
-                            Section::make('RU')->schema(self::translationFields('ru'))->columns(2),
+                            Section::make('UK')
+                                ->schema(self::translationFields('uk'))
+                                ->columns(2),
+
+                            Section::make('EN')
+                                ->schema(self::translationFields('en'))
+                                ->columns(2),
+
+                            Section::make('RU')
+                                ->schema(self::translationFields('ru'))
+                                ->columns(2),
                         ]),
 
                     Tab::make('Доставка / Габарити')
@@ -151,7 +156,6 @@ class ProductForm
                                 ->columns(2),
                         ]),
 
-                    // ✅ НОВА ВКЛАДКА ПІСЛЯ UUID
                     Tab::make('УКТЗЕД')
                         ->schema([
                             Section::make('Код УКТЗЕД')

@@ -2,12 +2,13 @@
 
 namespace App\Filament\Resources\Categories;
 
+use App\Filament\Resources\Categories\Pages\CategoryStructure;
 use App\Filament\Resources\Categories\Pages\CreateCategory;
 use App\Filament\Resources\Categories\Pages\EditCategory;
 use App\Filament\Resources\Categories\Pages\ListCategories;
+use App\Filament\Resources\Categories\RelationManagers\CategoryCharacteristicsRelationManager;
 use App\Filament\Resources\Categories\Schemas\CategoryForm;
 use App\Filament\Resources\Categories\Tables\CategoriesTable;
-use App\Filament\Resources\Categories\RelationManagers\CategoryCharacteristicsRelationManager;
 use App\Models\Category;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -47,30 +48,31 @@ class CategoryResource extends Resource
         return 'Каталог';
     }
 
-    /**
-     * ✅ RBAC: доступ до розділу
-     */
     public static function canViewAny(): bool
     {
         $user = auth()->user();
+
         return (bool) ($user?->hasRole('super-admin') || $user?->can('categories.view'));
     }
 
     public static function canCreate(): bool
     {
         $user = auth()->user();
+
         return (bool) ($user?->hasRole('super-admin') || $user?->can('categories.create'));
     }
 
     public static function canEdit($record): bool
     {
         $user = auth()->user();
+
         return (bool) ($user?->hasRole('super-admin') || $user?->can('categories.update'));
     }
 
     public static function canDelete($record): bool
     {
         $user = auth()->user();
+
         return (bool) ($user?->hasRole('super-admin') || $user?->can('categories.delete'));
     }
 
@@ -84,25 +86,26 @@ class CategoryResource extends Resource
         return CategoriesTable::configure($table);
     }
 
-    public static function getPages(): array
-    {
-        return [
-            'index' => ListCategories::route('/'),
-            'create' => CreateCategory::route('/create'),
-            'edit' => EditCategory::route('/{record}/edit'),
-        ];
-    }
-	
-	public static function getRelations(): array
+    public static function getRelations(): array
     {
         return [
             CategoryCharacteristicsRelationManager::class,
         ];
     }
 
+    public static function getPages(): array
+    {
+        return [
+            'index' => ListCategories::route('/'),
+            'structure' => CategoryStructure::route('/structure'),
+            'create' => CreateCategory::route('/create'),
+            'edit' => EditCategory::route('/{record}/edit'),
+        ];
+    }
+
     public static function getNavigationBadge(): ?string
     {
-        return static::getModel()::count();
+        return (string) static::getModel()::count();
     }
 
     public static function getNavigationBadgeColor(): ?string

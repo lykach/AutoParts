@@ -13,7 +13,6 @@
         "laravel/tinker": "^2.10.1",
         "livewire/livewire": "^4.1",
         "mcamara/laravel-localization": "^2.3",
-        "solution-forest/filament-tree": "^4.0",
         "spatie/laravel-permission": "^6.24",
         "spatie/laravel-translatable": "^6.12",
         "staudenmeir/laravel-adjacency-list": "^1.25"
