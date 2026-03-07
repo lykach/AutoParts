@@ -47,9 +47,19 @@ class ProductComponentsRelationManager extends RelationManager
                 ->default(1)
                 ->required(),
 
-            TextInput::make('title')
-                ->label('Назва позиції')
+            TextInput::make('title_uk')
+                ->label('Назва позиції (UK)')
                 ->required()
+                ->maxLength(255)
+                ->columnSpanFull(),
+
+            TextInput::make('title_en')
+                ->label('Назва позиції (EN)')
+                ->maxLength(255)
+                ->columnSpanFull(),
+
+            TextInput::make('title_ru')
+                ->label('Назва позиції (RU)')
                 ->maxLength(255)
                 ->columnSpanFull(),
 
@@ -89,11 +99,24 @@ class ProductComponentsRelationManager extends RelationManager
                     ->sortable()
                     ->alignCenter(),
 
-                Tables\Columns\TextColumn::make('title')
+                Tables\Columns\TextColumn::make('title_uk')
                     ->label('Назва')
                     ->searchable()
                     ->wrap()
-                    ->limit(120),
+                    ->limit(120)
+                    ->description(function (ProductComponent $record): ?string {
+                        $lines = [];
+
+                        if (filled($record->title_en)) {
+                            $lines[] = 'EN: ' . $record->title_en;
+                        }
+
+                        if (filled($record->title_ru)) {
+                            $lines[] = 'RU: ' . $record->title_ru;
+                        }
+
+                        return ! empty($lines) ? implode(' | ', $lines) : null;
+                    }),
 
                 Tables\Columns\TextColumn::make('article_raw')
                     ->label('Артикул')
@@ -123,7 +146,7 @@ class ProductComponentsRelationManager extends RelationManager
                             ->label("Список позицій (1 рядок = 1 позиція)")
                             ->rows(10)
                             ->required()
-                            ->helperText("Формат рядка:\nНазва | Артикул | К-сть\n\nПриклад:\nДиск зчеплення | 320 0178 10 | 1\nПідшипник вижимний | 500 0254 10 | 1"),
+                            ->helperText("Формат рядка:\nНазва UK | Артикул | К-сть\n\nПриклад:\nДиск зчеплення | 320 0178 10 | 1\nПідшипник вижимний | 500 0254 10 | 1"),
                     ])
                     ->action(function (array $data) {
                         $text = (string) ($data['list'] ?? '');
@@ -135,14 +158,20 @@ class ProductComponentsRelationManager extends RelationManager
 
                         foreach ($lines as $line) {
                             $line = trim((string) $line);
-                            if ($line === '') continue;
+
+                            if ($line === '') {
+                                continue;
+                            }
 
                             $parts = array_map('trim', explode('|', $line));
-                            $title = $parts[0] ?? '';
+
+                            $titleUk = $parts[0] ?? '';
                             $article = $parts[1] ?? null;
                             $qty = $parts[2] ?? 1;
 
-                            if ($title === '') continue;
+                            if ($titleUk === '') {
+                                continue;
+                            }
 
                             $maxPos++;
 
@@ -152,7 +181,9 @@ class ProductComponentsRelationManager extends RelationManager
                             ProductComponent::create([
                                 'product_id' => $product->id,
                                 'position' => $maxPos,
-                                'title' => $title,
+                                'title_uk' => $titleUk,
+                                'title_en' => null,
+                                'title_ru' => null,
                                 'article_raw' => $article ?: null,
                                 'article_norm' => $article ? Product::normalizeArticle($article) : null,
                                 'qty' => is_numeric($qty) ? (float) $qty : 1,

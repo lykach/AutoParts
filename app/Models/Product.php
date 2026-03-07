@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Product extends Model
 {
@@ -31,23 +33,19 @@ class Product extends Model
 
         'uuid',
 
-        // ✅ УКТЗЕД
         'uktzed_code',
 
-        // ✅ Доставка / габарити
         'weight_kg',
         'length_cm',
         'width_cm',
         'height_cm',
 
-        // ✅ best offer
         'best_price_uah',
         'best_price_original',
         'best_currency_code',
         'best_stock_source_id',
         'best_stock_qty',
 
-        // ✅ нове best delivery (days/hours)
         'best_delivery_unit',
         'best_delivery_min',
         'best_delivery_max',
@@ -62,13 +60,11 @@ class Product extends Model
         'tecdoc_id' => 'integer',
 
         'uuid' => 'string',
-
-        // ✅ УКТЗЕД
         'uktzed_code' => 'string',
 
         'weight_kg' => 'decimal:3',
         'length_cm' => 'decimal:1',
-        'width_cm'  => 'decimal:1',
+        'width_cm' => 'decimal:1',
         'height_cm' => 'decimal:1',
 
         'best_price_uah' => 'decimal:2',
@@ -93,46 +89,79 @@ class Product extends Model
     // -------------------
     // Relations
     // -------------------
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    public function manufacturer()
+    public function manufacturer(): BelongsTo
     {
         return $this->belongsTo(Manufacturer::class, 'manufacturer_id');
     }
 
-    public function translations()
+    public function translations(): HasMany
     {
         return $this->hasMany(ProductTranslation::class);
+    }
+
+    public function translationUk(): HasOne
+    {
+        return $this->hasOne(ProductTranslation::class)->where('locale', 'uk');
+    }
+
+    public function translationEn(): HasOne
+    {
+        return $this->hasOne(ProductTranslation::class)->where('locale', 'en');
+    }
+
+    public function translationRu(): HasOne
+    {
+        return $this->hasOne(ProductTranslation::class)->where('locale', 'ru');
     }
 
     public function translation(string $locale = null): ?ProductTranslation
     {
         $locale = $locale ?: app()->getLocale();
 
+        if (! $this->relationLoaded('translations')) {
+            return $this->translations()
+                ->whereIn('locale', [$locale, 'uk', 'en', 'ru'])
+                ->get()
+                ->sortBy(function (ProductTranslation $translation) use ($locale) {
+                    return match ($translation->locale) {
+                        $locale => 1,
+                        'uk' => 2,
+                        'en' => 3,
+                        'ru' => 4,
+                        default => 5,
+                    };
+                })
+                ->first();
+        }
+
         return $this->translations->firstWhere('locale', $locale)
             ?: $this->translations->firstWhere('locale', 'uk')
+            ?: $this->translations->firstWhere('locale', 'en')
+            ?: $this->translations->firstWhere('locale', 'ru')
             ?: $this->translations->first();
     }
 
-    public function stockItems()
+    public function stockItems(): HasMany
     {
         return $this->hasMany(StockItem::class);
     }
 
-    public function bestSource()
+    public function bestSource(): BelongsTo
     {
         return $this->belongsTo(StockSource::class, 'best_stock_source_id');
     }
 
-    public function oemNumbers()
+    public function oemNumbers(): HasMany
     {
         return $this->hasMany(ProductOemNumber::class);
     }
 
-    public function components()
+    public function components(): HasMany
     {
         return $this->hasMany(ProductComponent::class)->orderBy('position');
     }
@@ -142,38 +171,38 @@ class Product extends Model
         return $this->components()->count();
     }
 
-    public function barcodes()
+    public function barcodes(): HasMany
     {
         return $this->hasMany(ProductBarcode::class);
     }
 
-    public function primaryBarcode()
+    public function primaryBarcode(): HasOne
     {
         return $this->hasOne(ProductBarcode::class)->where('is_primary', true);
     }
 
-    public function files()
+    public function files(): HasMany
     {
         return $this->hasMany(ProductFile::class)->orderBy('sort_order');
     }
 
-    public function primaryFile()
+    public function primaryFile(): HasOne
     {
         return $this->hasOne(ProductFile::class)->where('is_primary', true);
     }
 
-    public function relatedLinks()
+    public function relatedLinks(): HasMany
     {
         return $this->hasMany(ProductRelated::class, 'product_id')
             ->orderBy('sort_order');
     }
 
-    public function images()
+    public function images(): HasMany
     {
         return $this->hasMany(ProductImage::class)->orderBy('sort_order');
     }
 
-    public function primaryImage()
+    public function primaryImage(): HasOne
     {
         return $this->hasOne(ProductImage::class)->where('is_primary', true);
     }
@@ -194,19 +223,32 @@ class Product extends Model
     public static function normalizeArticle(?string $article): string
     {
         $s = trim((string) $article);
-        if ($s === '') return '';
+
+        if ($s === '') {
+            return '';
+        }
 
         $s = mb_strtoupper($s, 'UTF-8');
         $s = preg_replace('/[\s\-\.\_\/\\\\]+/u', '', $s) ?? $s;
 
         $map = [
-            'А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M',
-            'Н' => 'H', 'О' => 'O', 'Р' => 'P', 'С' => 'C', 'Т' => 'T',
-            'Х' => 'X', 'У' => 'Y', 'І' => 'I',
+            'А' => 'A',
+            'В' => 'B',
+            'Е' => 'E',
+            'К' => 'K',
+            'М' => 'M',
+            'Н' => 'H',
+            'О' => 'O',
+            'Р' => 'P',
+            'С' => 'C',
+            'Т' => 'T',
+            'Х' => 'X',
+            'У' => 'Y',
+            'І' => 'I',
             'Ё' => 'E',
         ];
-        $s = strtr($s, $map);
 
+        $s = strtr($s, $map);
         $s = preg_replace('/[^\p{L}\p{N}]+/u', '', $s) ?? $s;
 
         return $s;
@@ -230,7 +272,7 @@ class Product extends Model
                 $p->article_raw = mb_strtoupper((string) $p->article_raw, 'UTF-8');
             }
 
-            if (!empty($p->article_raw) && (empty($p->article_norm) || $p->isDirty('article_raw'))) {
+            if (! empty($p->article_raw) && (empty($p->article_norm) || $p->isDirty('article_raw'))) {
                 $p->article_norm = self::normalizeArticle($p->article_raw);
             }
 
@@ -249,15 +291,14 @@ class Product extends Model
                 }
             }
 
-            foreach (['weight_kg', 'length_cm', 'width_cm', 'height_cm'] as $f) {
-                if ($p->{$f} !== null && (float) $p->{$f} < 0) {
+            foreach (['weight_kg', 'length_cm', 'width_cm', 'height_cm'] as $field) {
+                if ($p->{$field} !== null && (float) $p->{$field} < 0) {
                     throw ValidationException::withMessages([
-                        $f => 'Значення не може бути від’ємним.',
+                        $field => 'Значення не може бути від’ємним.',
                     ]);
                 }
             }
 
-            // ✅ УКТЗЕД: прибрати пробіли (якщо хтось вставить "8708 99 97 90")
             if ($p->uktzed_code !== null) {
                 $clean = preg_replace('/\s+/', '', (string) $p->uktzed_code);
                 $clean = trim((string) $clean);
@@ -272,7 +313,7 @@ class Product extends Model
     public function recalcBestOffer(): void
     {
         $items = $this->stockItems()
-            ->whereNotNull('price_sell_uah') // вже перераховано в БД
+            ->whereNotNull('price_sell_uah')
             ->where('availability_status', '!=', 'discontinued')
             ->get();
 
@@ -285,7 +326,10 @@ class Product extends Model
             }
 
             $uah = $it->price_sell_uah;
-            if ($uah === null) continue;
+
+            if ($uah === null) {
+                continue;
+            }
 
             if ($bestUah === null || (float) $uah < $bestUah) {
                 $bestUah = (float) $uah;
@@ -314,7 +358,6 @@ class Product extends Model
             'best_currency_code' => strtoupper((string) ($best->currency ?? 'UAH')),
             'best_stock_source_id' => $best->stock_source_id,
             'best_stock_qty' => $best->sellable_qty,
-
             'best_delivery_unit' => $best->delivery_unit ?: 'days',
             'best_delivery_min' => $best->delivery_min,
             'best_delivery_max' => $best->delivery_max,
@@ -326,7 +369,19 @@ class Product extends Model
     // -------------------
     public function getDisplayNameAttribute(): string
     {
-        return (string) ($this->translation()?->name ?? $this->article_raw ?? 'Без назви');
+        return (string) (
+            $this->translationUk?->name
+            ?? $this->translationEn?->name
+            ?? $this->translationRu?->name
+            ?? $this->translation()?->name
+            ?? $this->article_raw
+            ?? 'Без назви'
+        );
+    }
+
+    public function getDisplayArticleAttribute(): string
+    {
+        return (string) ($this->article_raw ?: ($this->article_norm ?: '—'));
     }
 
     public function getMpnAttribute(): string

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductComponent extends Model
 {
@@ -11,7 +12,9 @@ class ProductComponent extends Model
     protected $fillable = [
         'product_id',
         'position',
-        'title',
+        'title_uk',
+        'title_en',
+        'title_ru',
         'article_raw',
         'article_norm',
         'qty',
@@ -24,7 +27,7 @@ class ProductComponent extends Model
         'qty' => 'decimal:3',
     ];
 
-    public function product()
+    public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
     }
@@ -33,7 +36,18 @@ class ProductComponent extends Model
     {
         static::saving(function (self $c) {
             // title trim
-            $c->title = trim((string) $c->title);
+            $c->title_uk = trim((string) $c->title_uk);
+            $c->title_en = filled($c->title_en) ? trim((string) $c->title_en) : null;
+            $c->title_ru = filled($c->title_ru) ? trim((string) $c->title_ru) : null;
+
+            // якщо title_en / title_ru пусті рядки — в null
+            if ($c->title_en === '') {
+                $c->title_en = null;
+            }
+
+            if ($c->title_ru === '') {
+                $c->title_ru = null;
+            }
 
             // ✅ article normalize + UPPERCASE
             $raw = trim((string) ($c->article_raw ?? ''));

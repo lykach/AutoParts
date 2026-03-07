@@ -168,7 +168,7 @@ class CategoryForm
                         ->dehydrated(false)
                         ->helperText('Оновлюється автоматично залежно від наявності дочірніх категорій.'),
                 ])
-                ->columns(2),
+                ->columns(1),
 
             Tabs::make('Мови')
                 ->tabs([
