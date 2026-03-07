@@ -12,6 +12,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class CategoryForm
@@ -23,55 +24,54 @@ class CategoryForm
                 ->schema([
                     SelectTree::make('parent_id')
                         ->label('Батьківська категорія')
-                        ->relationship(
-                            relationship: 'parent',
-                            titleAttribute: 'name_uk',
-                            parentAttribute: 'parent_id',
-                            modifyQueryUsing: function ($query, $record) {
-                                if ($record instanceof Category && $record->exists) {
-                                    $query->where('id', '!=', $record->id);
-
-                                    $descendants = $record->descendantIds();
-                                    if (! empty($descendants)) {
-                                        $query->whereNotIn('id', $descendants);
-                                    }
-                                }
-
-                                return $query->orderBy('name_uk');
-                            }
-                        )
+                        ->getTreeUsing(function ($record) {
+                            return self::buildParentTree($record instanceof Category ? $record : null);
+                        })
+                        ->enableBranchNode()
                         ->searchable()
                         ->defaultOpenLevel(2)
                         ->placeholder('Коренева категорія')
                         ->emptyLabel('Нічого не знайдено')
-                        ->helperText('Якщо не вибирати батька — це буде root категорія.')
+                        ->helperText('Якщо не вибирати батька — це буде root категорія. Недоступні категорії одразу вимкнені.')
                         ->live()
+                        ->afterStateHydrated(function (callable $set, callable $get, $record) {
+                            if ($record instanceof Category && $record->exists) {
+                                return;
+                            }
+
+                            if (blank($get('order'))) {
+                                $set('order', self::getNextOrderForParent($get('parent_id')));
+                            }
+                        })
                         ->afterStateUpdated(function ($state, callable $set, callable $get, $record) {
-                            if (! $state) {
-                                return;
+                            if ($state) {
+                                $parent = Category::find((int) $state);
+
+                                if ($parent && ! $parent->canHaveChildren()) {
+                                    Notification::make()
+                                        ->danger()
+                                        ->title('Помилка')
+                                        ->body("Категорія '{$parent->name_uk}' не може мати підкатегорій, бо має товари або характеристики.")
+                                        ->send();
+
+                                    $set('parent_id', null);
+
+                                    return;
+                                }
+
+                                if ((bool) $get('is_container') === true) {
+                                    Notification::make()
+                                        ->warning()
+                                        ->title('Container скасовано')
+                                        ->body('Контейнерна категорія може бути тільки root.')
+                                        ->send();
+
+                                    $set('is_container', false);
+                                }
                             }
 
-                            $parent = Category::find((int) $state);
-
-                            if ($parent && ! $parent->canHaveChildren()) {
-                                Notification::make()
-                                    ->danger()
-                                    ->title('Помилка')
-                                    ->body("Категорія '{$parent->name_uk}' не може мати підкатегорій, бо має товари або характеристики.")
-                                    ->send();
-
-                                $set('parent_id', null);
-                                return;
-                            }
-
-                            if ((bool) $get('is_container') === true) {
-                                Notification::make()
-                                    ->warning()
-                                    ->title('Container скасовано')
-                                    ->body('Контейнерна категорія може бути тільки root.')
-                                    ->send();
-
-                                $set('is_container', false);
+                            if (! ($record instanceof Category && $record->exists)) {
+                                $set('order', self::getNextOrderForParent($state));
                             }
                         }),
 
@@ -108,7 +108,7 @@ class CategoryForm
                     TextInput::make('order')
                         ->label('Порядок')
                         ->numeric()
-                        ->helperText('Якщо не вказати — буде поставлено автоматично в межах цього батька.'),
+                        ->helperText('Для нової категорії підставляється автоматично як наступний номер серед дітей вибраного батька. За потреби можна змінити вручну.'),
 
                     FileUpload::make('image')
                         ->label('Зображення')
@@ -141,10 +141,12 @@ class CategoryForm
                                     ->send();
 
                                 $set('is_container', false);
+
                                 return;
                             }
 
                             $id = $get('id');
+
                             if (! $id) {
                                 return;
                             }
@@ -232,5 +234,105 @@ class CategoryForm
                         ]),
                 ]),
         ];
+    }
+
+    protected static function buildParentTree(?Category $record = null): array
+    {
+        $excludedIds = [];
+
+        if ($record?->exists) {
+            $excludedIds[] = (int) $record->id;
+
+            $descendants = $record->descendantIds();
+
+            foreach ($descendants as $descendantId) {
+                $excludedIds[] = (int) $descendantId;
+            }
+        }
+
+        $categories = Category::query()
+            ->select([
+                'id',
+                'parent_id',
+                'name_uk',
+                'is_container',
+                'is_leaf',
+                'children_count',
+                'products_total_count',
+            ])
+            ->orderBy('parent_id')
+            ->orderBy('order')
+            ->orderBy('name_uk')
+            ->get();
+
+        $grouped = $categories->groupBy(fn (Category $category) => $category->parent_id ?: 0);
+
+        return self::buildTreeLevel(
+            grouped: $grouped,
+            parentId: 0,
+            excludedIds: $excludedIds,
+        );
+    }
+
+    protected static function buildTreeLevel(Collection $grouped, int $parentId, array $excludedIds): array
+    {
+        /** @var Collection<int, Category> $nodes */
+        $nodes = $grouped->get($parentId, collect());
+
+        return $nodes
+            ->map(function (Category $category) use ($grouped, $excludedIds) {
+                $id = (int) $category->id;
+                $children = self::buildTreeLevel($grouped, $id, $excludedIds);
+
+                return [
+                    'name' => self::formatTreeNodeLabel($category),
+                    'value' => (string) $id,
+                    'hidden' => in_array($id, $excludedIds, true),
+                    'disabled' => ! $category->canHaveChildren() || in_array($id, $excludedIds, true),
+                    'children' => $children,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    protected static function formatTreeNodeLabel(Category $category): string
+    {
+        $icon = match (true) {
+            (bool) $category->is_container => '📦',
+            (bool) $category->is_leaf => '📄',
+            default => '📁',
+        };
+
+        $badges = [];
+
+        if ((bool) $category->is_container) {
+            $badges[] = '[container]';
+        } elseif ((bool) $category->is_leaf) {
+            $badges[] = '[leaf]';
+        } else {
+            $badges[] = '[parent]';
+        }
+
+        if (! $category->canHaveChildren()) {
+            $badges[] = '[no-children]';
+        }
+
+        $productsCount = (int) ($category->products_total_count ?? 0);
+
+        return trim(sprintf(
+            '%s %s (%d) %s',
+            $icon,
+            $category->name_uk,
+            $productsCount,
+            implode(' ', $badges),
+        ));
+    }
+
+    protected static function getNextOrderForParent($parentId): int
+    {
+        return ((int) Category::query()
+            ->where('parent_id', $parentId ?: null)
+            ->max('order')) + 1;
     }
 }
