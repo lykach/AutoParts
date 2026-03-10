@@ -24,21 +24,25 @@ class StoreForm
     {
         $mainCurrencyId = $state['currency_id'] ?? null;
         $addCurrencies = data_get($state, 'settings.localization.additional_currency_ids', []);
+
         if (is_array($addCurrencies)) {
             $addCurrencies = array_values(array_filter(
                 $addCurrencies,
                 fn ($id) => (string) $id !== (string) $mainCurrencyId
             ));
+
             data_set($state, 'settings.localization.additional_currency_ids', $addCurrencies);
         }
 
         $mainLang = $state['default_language'] ?? null;
         $addLangs = data_get($state, 'settings.localization.additional_languages', []);
+
         if (is_array($addLangs)) {
             $addLangs = array_values(array_filter(
                 $addLangs,
                 fn ($code) => (string) $code !== (string) $mainLang
             ));
+
             data_set($state, 'settings.localization.additional_languages', $addLangs);
         }
 
@@ -67,11 +71,18 @@ class StoreForm
 
         $lockedForMain = fn ($get) => (bool) $get('is_main');
 
-        $hasMainStore = fn (?Store $record): bool =>
+        $hasAnotherMainStore = fn (?Store $record): bool =>
             Store::query()
                 ->where('is_main', true)
                 ->when($record?->id, fn ($q) => $q->where('id', '!=', $record->id))
                 ->exists();
+
+        $hasAnyMainStore = fn (?Store $record): bool =>
+            Store::query()
+                ->where('is_main', true)
+                ->when($record?->id, fn ($q) => $q->where('id', '!=', $record->id))
+                ->exists()
+            || (bool) $record?->is_main;
 
         return $schema
             ->columns(1)
@@ -80,9 +91,6 @@ class StoreForm
                     ->contained(false)
                     ->tabs([
 
-                        // =====================================================
-                        // ОСНОВНЕ
-                        // =====================================================
                         Tab::make('Основне')->schema([
                             Grid::make(['default' => 1, 'lg' => 3])->schema([
                                 Grid::make(1)
@@ -98,15 +106,49 @@ class StoreForm
 
                                                 Toggle::make('is_main')
                                                     ->label('Головний магазин')
-                                                    ->live()
-                                                    ->disabled(function ($get, ?Store $record) use ($hasMainStore) {
-                                                        return $hasMainStore($record) && ! (bool) $get('is_main');
+                                                    ->default(function (?Store $record) use ($hasAnyMainStore) {
+                                                        return ! $hasAnyMainStore($record);
                                                     })
-                                                    ->helperText(function ($get, ?Store $record) use ($hasMainStore) {
-                                                        if ($hasMainStore($record) && ! (bool) $get('is_main')) {
+                                                    ->live()
+                                                    ->disabled(function ($get, ?Store $record) use ($hasAnyMainStore, $hasAnotherMainStore) {
+                                                        if ((bool) $record?->is_main) {
+                                                            return true;
+                                                        }
+
+                                                        if (! $hasAnyMainStore($record)) {
+                                                            return true;
+                                                        }
+
+                                                        return $hasAnotherMainStore($record) && ! (bool) $get('is_main');
+                                                    })
+                                                    ->helperText(function ($get, ?Store $record) use ($hasAnyMainStore, $hasAnotherMainStore) {
+                                                        if ((bool) $record?->is_main) {
+                                                            return 'Це головний магазин. У системі має бути один головний магазин.';
+                                                        }
+
+                                                        if (! $hasAnyMainStore($record)) {
+                                                            return 'Поки що головного магазину немає, тому перший магазин обов’язково має бути головним.';
+                                                        }
+
+                                                        if ($hasAnotherMainStore($record) && ! (bool) $get('is_main')) {
                                                             return 'Головний магазин вже існує. Може бути тільки один.';
                                                         }
+
                                                         return null;
+                                                    })
+                                                    ->afterStateHydrated(function ($state, $set, ?Store $record) use ($hasAnyMainStore, $defaultCurrencyId, $defaultLanguageCode) {
+                                                        if ((bool) $record?->is_main || ! $hasAnyMainStore($record)) {
+                                                            $set('is_main', true);
+                                                            $set('type', 'main');
+                                                            $set('parent_id', null);
+                                                            $set('inherit_defaults', false);
+                                                            $set('currency_id', $defaultCurrencyId());
+                                                            $set('default_language', $defaultLanguageCode());
+                                                            $set('timezone', 'Europe/Kyiv');
+                                                        } elseif (! (bool) $record?->is_main && blank($state)) {
+                                                            $set('is_main', false);
+                                                            $set('type', 'branch');
+                                                        }
                                                     })
                                                     ->afterStateUpdated(function (?bool $state, $set) use ($defaultCurrencyId, $defaultLanguageCode) {
                                                         if ($state) {
@@ -129,24 +171,73 @@ class StoreForm
                                                     ->label('Успадковувати налаштування від головного')
                                                     ->default(true)
                                                     ->live()
-                                                    ->disabled(fn ($get) => (bool) $get('is_main')),
+                                                    ->disabled(function ($get, ?Store $record) use ($hasAnyMainStore) {
+                                                        return (bool) $get('is_main') || ! $hasAnyMainStore($record);
+                                                    })
+                                                    ->helperText(function (?Store $record) use ($hasAnyMainStore) {
+                                                        return ! $hasAnyMainStore($record)
+                                                            ? 'Поки немає головного магазину, успадковувати нічого — спочатку потрібно створити головний.'
+                                                            : null;
+                                                    }),
 
                                                 Select::make('type')
                                                     ->label('Тип')
-                                                    ->options([
-                                                        'main' => 'Головний',
-                                                        'branch' => 'Філія',
-                                                    ])
-                                                    ->default('branch')
+                                                    ->options(function (?Store $record) use ($hasAnyMainStore) {
+                                                        if ((bool) $record?->is_main || ! $hasAnyMainStore($record)) {
+                                                            return [
+                                                                'main' => 'Головний',
+                                                            ];
+                                                        }
+
+                                                        return [
+                                                            'branch' => 'Філія',
+                                                        ];
+                                                    })
+                                                    ->default(function (?Store $record) use ($hasAnyMainStore) {
+                                                        return ((bool) $record?->is_main || ! $hasAnyMainStore($record))
+                                                            ? 'main'
+                                                            : 'branch';
+                                                    })
                                                     ->required()
-                                                    ->disabled(fn ($get) => (bool) $get('is_main')),
+                                                    ->disabled(true)
+                                                    ->dehydrated()
+                                                    ->validationMessages([
+                                                        'required' => 'Оберіть тип магазину.',
+                                                    ])
+                                                    ->helperText(function (?Store $record) use ($hasAnyMainStore) {
+                                                        if ((bool) $record?->is_main || ! $hasAnyMainStore($record)) {
+                                                            return 'Перший або єдиний головний магазин має тип "Головний".';
+                                                        }
+
+                                                        return 'Оскільки головний магазин уже існує, новий магазин може бути тільки філією.';
+                                                    }),
 
                                                 Select::make('parent_id')
                                                     ->label('Батьківський магазин')
-                                                    ->options(fn () => Store::query()->orderBy('sort_order')->pluck('name_uk', 'id')->all())
+                                                    ->options(function (?Store $record) {
+                                                        return Store::query()
+                                                            ->where('is_main', true)
+                                                            ->when($record?->id, fn ($q) => $q->where('id', '!=', $record->id))
+                                                            ->orderBy('sort_order')
+                                                            ->pluck('name_uk', 'id')
+                                                            ->all();
+                                                    })
                                                     ->searchable()
                                                     ->preload()
-                                                    ->disabled(fn ($get) => (bool) $get('is_main')),
+                                                    ->disabled(function ($get, ?Store $record) use ($hasAnyMainStore) {
+                                                        return (bool) $get('is_main') || ! $hasAnyMainStore($record);
+                                                    })
+                                                    ->helperText(function ($get, ?Store $record) use ($hasAnyMainStore) {
+                                                        if (! $hasAnyMainStore($record)) {
+                                                            return 'Поки немає головного магазину — філію створити не можна.';
+                                                        }
+
+                                                        if ((bool) $get('is_main')) {
+                                                            return 'Для головного магазину батьківський магазин не використовується.';
+                                                        }
+
+                                                        return 'Для філії вибирається головний магазин.';
+                                                    }),
 
                                                 TextInput::make('code')
                                                     ->label('Внутрішній код')
@@ -173,8 +264,6 @@ class StoreForm
                                                 Toggle::make('settings.overrides.contacts')->label('Свої контакти')->default(false),
                                                 Toggle::make('settings.overrides.seo')->label('Своє SEO')->default(false),
                                                 Toggle::make('settings.overrides.legal')->label('Свої юридичні')->default(false),
-
-                                                // ✅ залишаємо ключі, щоб не ламати логіку/дані
                                                 Toggle::make('settings.overrides.delivery')->label('Своя доставка/оплата')->default(false),
                                                 Toggle::make('settings.overrides.stock_sources')->label('Свої склади')->default(false),
                                             ]),
@@ -185,10 +274,19 @@ class StoreForm
                                                     ->label('Назва магазину')
                                                     ->required()
                                                     ->maxLength(255)
+                                                    ->validationMessages([
+                                                        'required' => 'Вкажи назву магазину.',
+                                                    ])
                                                     ->live(onBlur: true)
                                                     ->afterStateUpdated(function (?string $state, $set, ?Store $record) {
-                                                        if (! filled($state)) return;
-                                                        if (filled($record?->slug)) return;
+                                                        if (! filled($state)) {
+                                                            return;
+                                                        }
+
+                                                        if (filled($record?->slug)) {
+                                                            return;
+                                                        }
+
                                                         $set('slug', Str::slug($state));
                                                     }),
 
@@ -196,7 +294,11 @@ class StoreForm
                                                     ->label('Slug')
                                                     ->required()
                                                     ->maxLength(255)
-                                                    ->unique(ignoreRecord: true),
+                                                    ->unique(ignoreRecord: true)
+                                                    ->validationMessages([
+                                                        'required' => 'Вкажи slug.',
+                                                        'unique' => 'Такий slug уже існує.',
+                                                    ]),
                                             ]),
 
                                         Section::make('Країна та адреса')
@@ -214,9 +316,17 @@ class StoreForm
                                                     )
                                                     ->columnSpanFull(),
 
-                                                TextInput::make('region')->label('Область / Регіон')->maxLength(120),
-                                                TextInput::make('city')->label('Місто')->maxLength(120),
-                                                TextInput::make('postal_code')->label('Індекс')->maxLength(30),
+                                                TextInput::make('region')
+                                                    ->label('Область / Регіон')
+                                                    ->maxLength(120),
+
+                                                TextInput::make('city')
+                                                    ->label('Місто')
+                                                    ->maxLength(120),
+
+                                                TextInput::make('postal_code')
+                                                    ->label('Індекс')
+                                                    ->maxLength(30),
 
                                                 TextInput::make('address_line1')
                                                     ->label('Вулиця, будинок')
@@ -294,8 +404,12 @@ class StoreForm
                                                         ->all();
                                                 })
                                                 ->mutateDehydratedStateUsing(function ($state, $get) {
-                                                    if (! is_array($state)) return [];
+                                                    if (! is_array($state)) {
+                                                        return [];
+                                                    }
+
                                                     $main = $get('currency_id');
+
                                                     return array_values(array_filter($state, fn ($id) => (string) $id !== (string) $main));
                                                 })
                                                 ->columnSpanFull(),
@@ -317,8 +431,12 @@ class StoreForm
                                                         ->all();
                                                 })
                                                 ->mutateDehydratedStateUsing(function ($state, $get) {
-                                                    if (! is_array($state)) return [];
+                                                    if (! is_array($state)) {
+                                                        return [];
+                                                    }
+
                                                     $main = $get('default_language');
+
                                                     return array_values(array_filter($state, fn ($code) => (string) $code !== (string) $main));
                                                 })
                                                 ->columnSpanFull(),
@@ -349,9 +467,6 @@ class StoreForm
                             ]),
                         ]),
 
-                        // =====================================================
-                        // SEO
-                        // =====================================================
                         Tab::make('SEO')->schema([
                             static::inheritedNotice('seo'),
 
@@ -421,9 +536,6 @@ class StoreForm
                                 ]),
                         ]),
 
-                        // =====================================================
-                        // Контакти
-                        // =====================================================
                         Tab::make('Контакти')->schema([
                             static::inheritedNotice('contacts'),
 
@@ -461,14 +573,20 @@ class StoreForm
                                                     ->inline(false)
                                                     ->live()
                                                     ->afterStateUpdated(function ($state, $set, $get) {
-                                                        if (! $state) return;
+                                                        if (! $state) {
+                                                            return;
+                                                        }
 
                                                         $current = (string) ($get('number') ?? '');
                                                         $phones = $get('../../phones');
-                                                        if (! is_array($phones)) return;
+
+                                                        if (! is_array($phones)) {
+                                                            return;
+                                                        }
 
                                                         foreach ($phones as $k => $p) {
                                                             $num = (string) (($p['number'] ?? ''));
+
                                                             if ($num !== '' && $num !== $current) {
                                                                 $phones[$k]['is_primary'] = false;
                                                             }
@@ -485,9 +603,6 @@ class StoreForm
                             ]),
                         ]),
 
-                        // =====================================================
-                        // Графік
-                        // =====================================================
                         Tab::make('Графік')->schema([
                             static::inheritedNotice('working_hours'),
 
@@ -509,7 +624,7 @@ class StoreForm
                                     ->schema([
                                         Grid::make(['default' => 1, 'md' => 4])->schema([
                                             Select::make('day')->label('День')->options([
-                                                'mon' => 'Пн','tue' => 'Вт','wed' => 'Ср','thu' => 'Чт','fri' => 'Пт','sat' => 'Сб','sun' => 'Нд',
+                                                'mon' => 'Пн', 'tue' => 'Вт', 'wed' => 'Ср', 'thu' => 'Чт', 'fri' => 'Пт', 'sat' => 'Сб', 'sun' => 'Нд',
                                             ])->required(),
 
                                             Toggle::make('is_closed')
@@ -541,9 +656,6 @@ class StoreForm
                             ]),
                         ]),
 
-                        // =====================================================
-                        // Юридичні
-                        // =====================================================
                         Tab::make('Юридичні')->schema([
                             static::inheritedNotice('legal'),
 

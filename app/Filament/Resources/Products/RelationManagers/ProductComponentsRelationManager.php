@@ -24,7 +24,7 @@ class ProductComponentsRelationManager extends RelationManager
 
     public static function getBadge(Model $ownerRecord, string $pageClass): ?string
     {
-        return (string) ($ownerRecord->components()->count());
+        return (string) $ownerRecord->components()->count();
     }
 
     public static function getBadgeColor(Model $ownerRecord, string $pageClass): ?string
@@ -35,12 +35,6 @@ class ProductComponentsRelationManager extends RelationManager
     public function form(Schema $schema): Schema
     {
         return $schema->components([
-            TextInput::make('position')
-                ->label('Позиція')
-                ->numeric()
-                ->helperText('Якщо не вкажеш — буде поставлено автоматично в кінець.')
-                ->placeholder('Авто'),
-
             TextInput::make('qty')
                 ->label('К-сть')
                 ->numeric()
@@ -68,7 +62,7 @@ class ProductComponentsRelationManager extends RelationManager
                 ->maxLength(128)
                 ->live()
                 ->afterStateUpdated(function ($state, callable $set) {
-                    $raw = mb_strtoupper(trim((string) $state), 'UTF-8');
+                    $raw = mb_strtoupper((string) $state, 'UTF-8');
                     $set('article_raw', $raw);
                     $set('article_norm', Product::normalizeArticle($raw));
                 })
@@ -92,13 +86,7 @@ class ProductComponentsRelationManager extends RelationManager
     {
         return $table
             ->defaultSort('position', 'asc')
-            ->reorderable('position')
             ->columns([
-                Tables\Columns\TextColumn::make('position')
-                    ->label('#')
-                    ->sortable()
-                    ->alignCenter(),
-
                 Tables\Columns\TextColumn::make('title_uk')
                     ->label('Назва')
                     ->searchable()
@@ -136,14 +124,32 @@ class ProductComponentsRelationManager extends RelationManager
                     ->wrap(),
             ])
             ->headerActions([
-                CreateAction::make()->label('Додати позицію'),
+                CreateAction::make()
+                    ->label('Додати позицію')
+                    ->mutateDataUsing(function (array $data): array {
+                        $product = $this->getOwnerRecord();
+
+                        $data['position'] = ((int) ($product->components()->max('position') ?? 0)) + 1;
+
+                        if (! empty($data['article_raw'])) {
+                            $data['article_raw'] = mb_strtoupper(trim((string) $data['article_raw']), 'UTF-8');
+                            $data['article_norm'] = Product::normalizeArticle($data['article_raw']);
+                        } else {
+                            $data['article_raw'] = null;
+                            $data['article_norm'] = null;
+                        }
+
+                        $data['qty'] = is_numeric($data['qty'] ?? null) ? (float) $data['qty'] : 1;
+
+                        return $data;
+                    }),
 
                 Action::make('bulkAdd')
                     ->label('Додати списком')
                     ->icon('heroicon-o-clipboard-document-list')
                     ->form([
                         Textarea::make('list')
-                            ->label("Список позицій (1 рядок = 1 позиція)")
+                            ->label('Список позицій (1 рядок = 1 позиція)')
                             ->rows(10)
                             ->required()
                             ->helperText("Формат рядка:\nНазва UK | Артикул | К-сть\n\nПриклад:\nДиск зчеплення | 320 0178 10 | 1\nПідшипник вижимний | 500 0254 10 | 1"),
@@ -187,13 +193,35 @@ class ProductComponentsRelationManager extends RelationManager
                                 'article_raw' => $article ?: null,
                                 'article_norm' => $article ? Product::normalizeArticle($article) : null,
                                 'qty' => is_numeric($qty) ? (float) $qty : 1,
+                                'note' => null,
                             ]);
                         }
                     })
                     ->successNotificationTitle('Позиції комплекту додано'),
             ])
             ->actions([
-                EditAction::make(),
+                EditAction::make()
+                    ->mutateRecordDataUsing(function (array $data): array {
+                        if (! empty($data['article_raw'])) {
+                            $data['article_raw'] = mb_strtoupper(trim((string) $data['article_raw']), 'UTF-8');
+                        }
+
+                        return $data;
+                    })
+                    ->mutateDataUsing(function (array $data): array {
+                        if (! empty($data['article_raw'])) {
+                            $data['article_raw'] = mb_strtoupper(trim((string) $data['article_raw']), 'UTF-8');
+                            $data['article_norm'] = Product::normalizeArticle($data['article_raw']);
+                        } else {
+                            $data['article_raw'] = null;
+                            $data['article_norm'] = null;
+                        }
+
+                        $data['qty'] = is_numeric($data['qty'] ?? null) ? (float) $data['qty'] : 1;
+
+                        return $data;
+                    }),
+
                 DeleteAction::make(),
             ]);
     }

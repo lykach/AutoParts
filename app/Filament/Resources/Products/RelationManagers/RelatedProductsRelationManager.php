@@ -4,26 +4,24 @@ namespace App\Filament\Resources\Products\RelationManagers;
 
 use App\Models\Product;
 use App\Models\ProductRelated;
-use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class RelatedProductsRelationManager extends RelationManager
 {
     protected static string $relationship = 'relatedLinks';
 
-    protected static ?string $title = 'Супутні';
+    protected static ?string $title = 'Супутні товари';
 
     public static function getBadge(Model $ownerRecord, string $pageClass): ?string
     {
@@ -38,220 +36,368 @@ class RelatedProductsRelationManager extends RelationManager
     public function form(Schema $schema): Schema
     {
         return $schema->components([
-            Toggle::make('is_active')
-                ->label('Активно')
-                ->default(true),
-
-            TextInput::make('sort_order')
-                ->label('Порядок')
-                ->numeric()
-                ->default(null)
-                ->helperText('Якщо не вказати — стане в кінець автоматично.'),
-
             Select::make('related_product_id')
                 ->label('Супутній товар')
                 ->required()
+                ->native(false)
                 ->searchable()
-                ->preload(false)
+                ->searchDebounce(400)
+                ->live()
+                ->placeholder('Почни вводити артикул або назву...')
                 ->getSearchResultsUsing(function (string $search): array {
-                    $search = trim($search);
-
-                    return Product::query()
-                        ->when($search !== '', function (Builder $q) use ($search) {
-                            if (ctype_digit($search)) {
-                                $q->where('id', (int) $search)
-                                    ->orWhere('article_raw', 'like', "%{$search}%")
-                                    ->orWhere('article_norm', 'like', "%{$search}%");
-                                return;
-                            }
-
-                            $q->where('article_raw', 'like', "%{$search}%")
-                                ->orWhere('article_norm', 'like', "%{$search}%")
-                                ->orWhereHas('translations', function (Builder $t) use ($search) {
-                                    $t->where('name', 'like', "%{$search}%");
-                                });
-                        })
-                        ->with(['translations' => function ($t) {
-                            $t->whereIn('locale', ['uk', 'en', 'ru']);
-                        }])
-                        ->limit(30)
-                        ->get()
-                        ->mapWithKeys(function (Product $p) {
-                            return [$p->id => self::productLabel($p)];
-                        })
-                        ->all();
+                    return $this->searchProductsForSelect($search);
                 })
                 ->getOptionLabelUsing(function ($value): ?string {
-                    if (! $value) return null;
+                    if (blank($value)) {
+                        return null;
+                    }
 
-                    $p = Product::query()
-                        ->with(['translations' => fn ($t) => $t->whereIn('locale', ['uk', 'en', 'ru'])])
-                        ->find($value);
+                    return $this->getProductOptionLabel((int) $value);
+                })
+                ->validationMessages([
+                    'required' => 'Оберіть товар.',
+                ])
+                ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                    if (! filled($state)) {
+                        return;
+                    }
 
-                    return $p ? self::productLabel($p) : (string) $value;
-                }),
+                    $ownerId = (int) $this->getOwnerRecord()->id;
+                    $selectedProductId = (int) $state;
+                    $currentRelationId = $get('id');
 
-            Textarea::make('note')
-                ->label('Примітка')
-                ->rows(2)
-                ->maxLength(255)
-                ->columnSpanFull(),
-        ])->columns(2);
+                    if ($selectedProductId === $ownerId) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Помилка')
+                            ->body('Не можна додати товар до самого себе.')
+                            ->send();
+
+                        $set('related_product_id', null);
+
+                        return;
+                    }
+
+                    $exists = ProductRelated::query()
+                        ->where('product_id', $ownerId)
+                        ->where('related_product_id', $selectedProductId)
+                        ->when(
+                            filled($currentRelationId),
+                            fn (Builder $query) => $query->whereKeyNot((int) $currentRelationId)
+                        )
+                        ->exists();
+
+                    if ($exists) {
+                        Notification::make()
+                            ->warning()
+                            ->title('Уже додано')
+                            ->body('Цей товар уже є у списку супутніх.')
+                            ->send();
+
+                        $set('related_product_id', null);
+                    }
+                })
+                ->helperText('Пошук по артикулу та назві. Дубль і додавання самого себе заборонені.'),
+        ]);
     }
 
     public function table(Table $table): Table
     {
         return $table
             ->modifyQueryUsing(function (Builder $query) {
-                // ✅ підтягуємо супутній товар + переклади + primaryImage
                 return $query->with([
-                    'relatedProduct' => function ($q) {
-                        $q->with([
-                            'translations' => fn ($t) => $t->whereIn('locale', ['uk', 'en', 'ru']),
-                            'primaryImage:id,product_id,image_path,is_primary,sort_order,is_active',
-                        ]);
-                    },
+                    'relatedProduct.translationUk:id,product_id,locale,name',
+                    'relatedProduct.translationEn:id,product_id,locale,name',
+                    'relatedProduct.translationRu:id,product_id,locale,name',
+                    'relatedProduct.category:id,name_uk',
+                    'relatedProduct.manufacturer:id,name',
+                    'relatedProduct.primaryImage:id,product_id,image_path,is_primary,sort_order',
                 ]);
             })
             ->defaultSort('sort_order', 'asc')
+            ->reorderable('sort_order')
             ->columns([
-                Tables\Columns\IconColumn::make('is_active')
-                    ->label('Активно')
-                    ->boolean()
-                    ->alignCenter(),
-
-                Tables\Columns\TextColumn::make('sort_order')
-                    ->label('#')
-                    ->sortable()
-                    ->alignCenter(),
-
-                // ✅ Фото супутнього
                 Tables\Columns\ImageColumn::make('relatedProduct.primaryImage.image_path')
                     ->label('')
                     ->disk('public')
                     ->square()
-                    ->height(44)
-                    ->width(44)
+                    ->size(42)
                     ->defaultImageUrl(url('/images/no_image.webp'))
+                    ->extraImgAttributes([
+                        'loading' => 'lazy',
+                        'style' => 'object-fit: contain; background: #fff;',
+                    ])
                     ->toggleable(),
 
-                Tables\Columns\TextColumn::make('relatedProduct.id')
-                    ->label('ID')
-                    ->sortable(),
+                Tables\Columns\TextColumn::make('sort_order')
+                    ->label('#')
+                    ->sortable()
+                    ->alignCenter()
+                    ->width('70px'),
 
                 Tables\Columns\TextColumn::make('relatedProduct.article_raw')
                     ->label('Артикул')
-                    ->searchable()
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('relatedProduct', function (Builder $productQuery) use ($search) {
+                            $productQuery
+                                ->where('article_raw', 'like', "%{$search}%")
+                                ->orWhere('article_norm', 'like', "%{$search}%");
+                        });
+                    })
                     ->copyable()
                     ->copyMessage('Артикул скопійовано')
-                    ->placeholder('—')
+                    ->sortable()
                     ->wrap(),
 
-                Tables\Columns\TextColumn::make('related_name_all')
-                    ->label('Назва (UK/EN/RU)')
-                    ->state(function ($record) {
-                        $p = $record->relatedProduct;
-                        if (! $p) return '—';
-                        return self::translationsLabel($p);
-                    })
+                Tables\Columns\TextColumn::make('relatedProduct.display_name')
+                    ->label('Назва')
                     ->wrap()
-                    ->limit(120),
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('relatedProduct.translations', function (Builder $translationQuery) use ($search) {
+                            $translationQuery->where('name', 'like', "%{$search}%");
+                        });
+                    })
+                    ->description(function (ProductRelated $record): ?string {
+                        $parts = [];
 
-                Tables\Columns\TextColumn::make('note')
-                    ->label('Примітка')
-                    ->toggleable(isToggledHiddenByDefault: true)
-                    ->wrap(),
+                        if (filled($record->relatedProduct?->manufacturer?->name)) {
+                            $parts[] = $record->relatedProduct->manufacturer->name;
+                        }
+
+                        if (filled($record->relatedProduct?->category?->name_uk)) {
+                            $parts[] = $record->relatedProduct->category->name_uk;
+                        }
+
+                        return ! empty($parts) ? implode(' / ', $parts) : null;
+                    }),
+
+                Tables\Columns\TextColumn::make('relatedProduct.best_price_uah')
+                    ->label('Ціна')
+                    ->state(function (ProductRelated $record): string {
+                        $price = $record->relatedProduct?->best_price_uah;
+
+                        if ($price === null) {
+                            return '—';
+                        }
+
+                        return number_format((float) $price, 2, '.', ' ') . ' грн';
+                    }),
+
+                Tables\Columns\TextColumn::make('relatedProduct.best_stock_qty')
+                    ->label('Залишок')
+                    ->state(function (ProductRelated $record): string {
+                        $qty = $record->relatedProduct?->best_stock_qty;
+
+                        if ($qty === null) {
+                            return '—';
+                        }
+
+                        return rtrim(rtrim(number_format((float) $qty, 3, '.', ' '), '0'), '.');
+                    }),
+
+                Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Оновлено')
+                    ->dateTime('d.m.Y H:i')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->headerActions([
                 CreateAction::make()
-                    ->label('Додати супутній')
-                    ->mutateFormDataUsing(function (array $data): array {
-                        // ✅ якщо порядок не заданий — ставимо в кінець
-                        if (($data['sort_order'] ?? null) === null) {
-                            $owner = $this->getOwnerRecord();
-                            $max = (int) ($owner->relatedLinks()->max('sort_order') ?? 0);
-                            $data['sort_order'] = $max + 1;
-                        }
+                    ->label('Додати товар')
+                    ->mutateDataUsing(function (array $data): array {
+                        $data['sort_order'] = $this->getNextSortOrder();
+
                         return $data;
-                    }),
-
-                Action::make('bulkAddIds')
-                    ->label('Додати ID списком')
-                    ->icon('heroicon-o-clipboard-document-list')
-                    ->form([
-                        Textarea::make('ids')
-                            ->label("ID товарів (кожен з нового рядка)")
-                            ->rows(10)
-                            ->required(),
-                    ])
-                    ->action(function (array $data) {
-                        $owner = $this->getOwnerRecord();
-                        $lines = preg_split("/\r\n|\n|\r/", (string) ($data['ids'] ?? '')) ?: [];
-                        $max = (int) ($owner->relatedLinks()->max('sort_order') ?? 0);
-
-                        foreach ($lines as $line) {
-                            $id = (int) trim((string) $line);
-                            if ($id <= 0) continue;
-                            if ($id === (int) $owner->id) continue;
-
-                            $exists = ProductRelated::query()
-                                ->where('product_id', $owner->id)
-                                ->where('related_product_id', $id)
-                                ->exists();
-
-                            if ($exists) continue;
-
-                            $max++;
-
-                            ProductRelated::create([
-                                'product_id' => $owner->id,
-                                'related_product_id' => $id,
-                                'sort_order' => $max,
-                                'is_active' => true,
-                            ]);
-                        }
                     })
-                    ->successNotificationTitle('Супутні додано'),
+                    ->using(function (array $data): Model {
+                        $ownerId = (int) $this->getOwnerRecord()->id;
+                        $relatedProductId = (int) ($data['related_product_id'] ?? 0);
+
+                        $this->validateRelatedProduct($ownerId, $relatedProductId);
+
+                        return $this->getRelationship()->create($data);
+                    }),
             ])
             ->actions([
-                EditAction::make(),
+                EditAction::make()
+                    ->mutateDataUsing(function (array $data, Model $record): array {
+                        $data['sort_order'] = (int) ($record->sort_order ?? $this->getNextSortOrder());
+
+                        return $data;
+                    })
+                    ->using(function (Model $record, array $data): Model {
+                        $ownerId = (int) $this->getOwnerRecord()->id;
+                        $relatedProductId = (int) ($data['related_product_id'] ?? 0);
+
+                        $this->validateRelatedProduct($ownerId, $relatedProductId, (int) $record->getKey());
+
+                        $record->update($data);
+
+                        return $record;
+                    }),
+
                 DeleteAction::make(),
             ]);
     }
 
-    private static function productLabel(Product $p): string
+    protected function getNextSortOrder(): int
     {
-        $parts = [
-            '#' . $p->id,
-            $p->article_raw ? ('[' . $p->article_raw . ']') : null,
-            self::translationsLabel($p),
-        ];
-
-        $label = trim(implode(' ', array_filter($parts)));
-
-        return $label !== '' ? $label : ('#' . $p->id);
+        return ((int) $this->getOwnerRecord()->relatedLinks()->max('sort_order')) + 1;
     }
 
-    private static function translationsLabel(Product $p): string
+    protected function validateRelatedProduct(int $ownerId, int $relatedProductId, ?int $ignoreId = null): void
     {
-        $map = [];
-        foreach ($p->translations ?? [] as $tr) {
-            $loc = (string) ($tr->locale ?? '');
-            $name = trim((string) ($tr->name ?? ''));
-            if ($loc !== '' && $name !== '') {
-                $map[$loc] = $name;
-            }
+        if ($relatedProductId <= 0) {
+            throw ValidationException::withMessages([
+                'related_product_id' => 'Оберіть товар.',
+            ]);
         }
 
-        $uk = $map['uk'] ?? null;
-        $en = $map['en'] ?? null;
-        $ru = $map['ru'] ?? null;
+        if ($relatedProductId === $ownerId) {
+            Notification::make()
+                ->danger()
+                ->title('Помилка')
+                ->body('Не можна додати товар до самого себе.')
+                ->send();
 
-        $chunks = [];
-        if ($uk) $chunks[] = "UK: {$uk}";
-        if ($en) $chunks[] = "EN: {$en}";
-        if ($ru) $chunks[] = "RU: {$ru}";
+            throw ValidationException::withMessages([
+                'related_product_id' => 'Не можна додати товар до самого себе.',
+            ]);
+        }
 
-        return $chunks ? ('— ' . implode(' | ', $chunks)) : '';
+        $exists = ProductRelated::query()
+            ->where('product_id', $ownerId)
+            ->where('related_product_id', $relatedProductId)
+            ->when($ignoreId, fn (Builder $query) => $query->whereKeyNot($ignoreId))
+            ->exists();
+
+        if ($exists) {
+            Notification::make()
+                ->warning()
+                ->title('Уже додано')
+                ->body('Цей товар уже є у списку супутніх.')
+                ->send();
+
+            throw ValidationException::withMessages([
+                'related_product_id' => 'Цей товар уже доданий у супутні.',
+            ]);
+        }
+    }
+
+    protected function searchProductsForSelect(string $search): array
+    {
+        $search = trim($search);
+
+        if ($search === '') {
+            return [];
+        }
+
+        $ownerId = (int) $this->getOwnerRecord()->id;
+
+        return Product::query()
+            ->with([
+                'translationUk',
+                'translationEn',
+                'translationRu',
+                'category',
+                'manufacturer',
+            ])
+            ->where(function (Builder $query) use ($search) {
+                $query
+                    ->where('article_raw', 'like', "%{$search}%")
+                    ->orWhere('article_norm', 'like', "%{$search}%")
+                    ->orWhereHas('translations', function (Builder $translationQuery) use ($search) {
+                        $translationQuery->where('name', 'like', "%{$search}%");
+                    });
+            })
+            ->orderByRaw(
+                "
+                CASE
+                    WHEN article_raw = ? THEN 0
+                    WHEN article_norm = ? THEN 1
+                    WHEN article_raw LIKE ? THEN 2
+                    WHEN article_norm LIKE ? THEN 3
+                    ELSE 4
+                END
+                ",
+                [$search, $search, "{$search}%", "{$search}%"]
+            )
+            ->orderByDesc('is_active')
+            ->orderBy('id', 'desc')
+            ->limit(50)
+            ->get()
+            ->mapWithKeys(function (Product $product) use ($ownerId): array {
+                $flags = [];
+
+                if ((int) $product->id === $ownerId) {
+                    $flags[] = 'САМ ТОВАР';
+                }
+
+                $alreadyAdded = ProductRelated::query()
+                    ->where('product_id', $ownerId)
+                    ->where('related_product_id', $product->id)
+                    ->exists();
+
+                if ($alreadyAdded) {
+                    $flags[] = 'УЖЕ ДОДАНО';
+                }
+
+                return [
+                    $product->id => $this->formatProductOptionLabel($product, $flags),
+                ];
+            })
+            ->all();
+    }
+
+    protected function getProductOptionLabel(int $productId): ?string
+    {
+        $ownerId = (int) $this->getOwnerRecord()->id;
+
+        $product = Product::query()
+            ->with([
+                'translationUk',
+                'translationEn',
+                'translationRu',
+                'category',
+                'manufacturer',
+            ])
+            ->find($productId);
+
+        if (! $product) {
+            return null;
+        }
+
+        $flags = [];
+
+        if ((int) $product->id === $ownerId) {
+            $flags[] = 'САМ ТОВАР';
+        }
+
+        $alreadyAdded = ProductRelated::query()
+            ->where('product_id', $ownerId)
+            ->where('related_product_id', $product->id)
+            ->exists();
+
+        if ($alreadyAdded) {
+            $flags[] = 'УЖЕ ДОДАНО';
+        }
+
+        return $this->formatProductOptionLabel($product, $flags);
+    }
+
+    protected function formatProductOptionLabel(Product $product, array $flags = []): string
+    {
+        $article = $product->display_article;
+        $name = $product->display_name;
+        $category = $product->category?->name_uk ?: 'Без категорії';
+        $manufacturer = $product->manufacturer?->name ?: 'Без бренду';
+
+        $price = $product->best_price_uah !== null
+            ? number_format((float) $product->best_price_uah, 2, '.', ' ') . ' грн'
+            : 'без ціни';
+
+        $flagsText = ! empty($flags) ? ' [' . implode(' | ', $flags) . ']' : '';
+
+        return "[{$article}] {$name} — {$manufacturer} / {$category} / {$price}{$flagsText}";
     }
 }

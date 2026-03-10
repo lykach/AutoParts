@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Products\RelationManagers;
 use App\Models\Currency;
 use App\Models\StockItem;
 use App\Models\StockSourceLocation;
+use CodeWithDennis\FilamentSelectTree\SelectTree;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -18,46 +19,38 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rules\Unique;
 
 class StockItemsRelationManager extends RelationManager
 {
     protected static string $relationship = 'stockItems';
+
     protected static ?string $title = 'Залишки / Ціни';
 
-    /**
-     * ✅ Livewire state для create-модалки:
-     * коли юзер вибрав склад, який вже існує для цього товару — тут збережемо id існуючого stock_item.
-     */
     public ?int $existingStockItemId = null;
 
     public function form(Schema $schema): Schema
     {
-        $owner = $this->getOwnerRecord(); // Product
+        $owner = $this->getOwnerRecord();
 
         return $schema->components([
-            // ✅ технічне поле (не пишемо в БД) — щоб можна було бачити state у Livewire девтулз, за бажання
             Hidden::make('existing_stock_item_id')
                 ->dehydrated(false)
                 ->default(null),
 
-            Select::make('stock_source_location_id')
+            SelectTree::make('stock_source_location_id')
                 ->label('Склад постачальника')
                 ->required()
+                ->getTreeUsing(fn () => $this->buildStockSourceLocationTree())
                 ->searchable()
-                ->preload()
+                ->defaultOpenLevel(1)
+                ->placeholder('Оберіть склад постачальника')
+                ->emptyLabel('Нічого не знайдено')
+                ->helperText('Склади згруповані по постачальниках. Вибирається тільки конкретний склад.')
                 ->live()
-                ->options(fn () => StockSourceLocation::query()
-                    ->with('source')
-                    ->orderBy('sort_order')
-                    ->orderBy('name')
-                    ->get()
-                    ->mapWithKeys(fn ($l) => [
-                        $l->id => ($l->source?->name ? ($l->source->name . ' — ') : '') . $l->name,
-                    ])
-                    ->all()
-                )
-                // ✅ унікальність: (product_id + stock_source_location_id)
+                ->multiple(false)
+                ->validationAttribute('склад постачальника')
                 ->unique(
                     table: StockItem::class,
                     column: 'stock_source_location_id',
@@ -66,27 +59,34 @@ class StockItemsRelationManager extends RelationManager
                         if ($owner?->id) {
                             $rule->where('product_id', $owner->id);
                         }
+
                         return $rule;
                     }
                 )
                 ->validationMessages([
                     'unique' => 'Для цього товару цей склад уже доданий. Можеш вибрати інший або натиснути “Відредагувати існуючий”.',
+                    'required' => 'Оберіть склад постачальника.',
                 ])
                 ->afterStateUpdated(function ($state, callable $set, callable $get) use ($owner) {
-                    // ✅ завжди скидаємо при зміні
                     $this->existingStockItemId = null;
                     $set('existing_stock_item_id', null);
 
-                    if (!filled($state) || !($owner?->id)) {
+                    if (! filled($state) || ! ($owner?->id)) {
                         return;
                     }
 
-                    // ✅ CREATE-only (коли редагуємо — не треба)
-                    $currentId = $get('id'); // на Edit буде id, на Create null
-                    if (!filled($currentId)) {
+                    $locationId = (int) $state;
+
+                    if ($locationId <= 0) {
+                        return;
+                    }
+
+                    $currentId = $get('id');
+
+                    if (! filled($currentId)) {
                         $existingId = StockItem::query()
                             ->where('product_id', $owner->id)
-                            ->where('stock_source_location_id', (int) $state)
+                            ->where('stock_source_location_id', $locationId)
                             ->value('id');
 
                         if ($existingId) {
@@ -99,32 +99,31 @@ class StockItemsRelationManager extends RelationManager
                                 ->body('Можеш вибрати інший склад або натиснути “Відредагувати існуючий” внизу модалки.')
                                 ->send();
 
-                            // НЕ перекидаємо, НЕ закриваємо
                             return;
                         }
                     }
 
-                    // ✅ підстановка допоміжних полів (якщо це НЕ дубль)
                     $loc = StockSourceLocation::query()
-                        ->with('source:id,default_currency_code,delivery_unit,delivery_min,delivery_max')
-                        ->whereKey($state)
+                        ->with('source:id,name,default_currency_code,delivery_unit,delivery_min,delivery_max')
+                        ->whereKey($locationId)
                         ->first();
 
-                    // stock_source_id завжди синхронізуємо з локації
                     if ($loc?->stock_source_id) {
                         $set('stock_source_id', (int) $loc->stock_source_id);
                     }
 
-                    // валюта (якщо не вибрана)
-                    if (!filled($get('currency'))) {
+                    if (! filled($get('currency'))) {
                         $set('currency', $loc?->source?->default_currency_code ?: 'UAH');
                     }
 
-                    // доставка (підтягуємо, якщо ще не задана вручну)
-                    if (!filled($get('delivery_unit')) && $get('delivery_min') === null && $get('delivery_max') === null) {
+                    if (
+                        ! filled($get('delivery_unit'))
+                        && $get('delivery_min') === null
+                        && $get('delivery_max') === null
+                    ) {
                         $unit = $loc?->delivery_unit ?: ($loc?->source?->delivery_unit ?: 'days');
-                        $set('delivery_unit', $unit);
 
+                        $set('delivery_unit', $unit);
                         $set('delivery_min', $loc?->delivery_min ?? $loc?->source?->delivery_min);
                         $set('delivery_max', $loc?->delivery_max ?? $loc?->source?->delivery_max);
                     }
@@ -144,20 +143,44 @@ class StockItemsRelationManager extends RelationManager
                 ->numeric()
                 ->required()
                 ->default(0)
-                ->minValue(0),
+                ->minValue(0)
+                ->live(debounce: 300)
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNumberToZero($state))
+                ->afterStateHydrated(function ($state, callable $set) {
+                    $set('qty', self::normalizeNumberToZero($state));
+                })
+                ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                    self::refreshComputedQuantities($set, $get);
+                }),
 
             TextInput::make('reserved_qty')
                 ->label('Резерв')
                 ->numeric()
                 ->default(0)
-                ->minValue(0),
+                ->minValue(0)
+                ->live(debounce: 300)
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNumberToZero($state))
+                ->afterStateHydrated(function ($state, callable $set) {
+                    $set('reserved_qty', self::normalizeNumberToZero($state));
+                })
+                ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                    self::refreshComputedQuantities($set, $get);
+                }),
 
             TextInput::make('multiplicity')
                 ->label('Кратність')
                 ->numeric()
                 ->required()
                 ->default(1)
-                ->minValue(1),
+                ->minValue(1)
+                ->live(debounce: 300)
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNumberToOne($state))
+                ->afterStateHydrated(function ($state, callable $set) {
+                    $set('multiplicity', self::normalizeNumberToOne($state));
+                })
+                ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                    self::refreshComputedQuantities($set, $get);
+                }),
 
             Select::make('currency')
                 ->label('Валюта')
@@ -177,24 +200,34 @@ class StockItemsRelationManager extends RelationManager
                 ->numeric()
                 ->minValue(0)
                 ->step(0.01)
-                ->placeholder('—'),
+                ->placeholder('—')
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNullableDecimal($state)),
 
             TextInput::make('price_sell')
                 ->label('Продаж (в валюті)')
                 ->numeric()
                 ->minValue(0)
                 ->step(0.01)
-                ->placeholder('—'),
+                ->placeholder('—')
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNullableDecimal($state)),
 
             TextInput::make('available_qty')
                 ->label('Доступно (qty - резерв)')
                 ->disabled()
-                ->dehydrated(false),
+                ->dehydrated(false)
+                ->formatStateUsing(fn ($state) => $state !== null ? (string) $state : null)
+                ->afterStateHydrated(function ($state, callable $set, callable $get) {
+                    self::refreshComputedQuantities($set, $get);
+                }),
 
             TextInput::make('sellable_qty')
                 ->label('До продажу (з кратністю)')
                 ->disabled()
-                ->dehydrated(false),
+                ->dehydrated(false)
+                ->formatStateUsing(fn ($state) => $state !== null ? (string) $state : null)
+                ->afterStateHydrated(function ($state, callable $set, callable $get) {
+                    self::refreshComputedQuantities($set, $get);
+                }),
 
             Select::make('delivery_unit')
                 ->label('Доставка: одиниці')
@@ -206,13 +239,15 @@ class StockItemsRelationManager extends RelationManager
                 ->label('Доставка: від')
                 ->numeric()
                 ->minValue(0)
-                ->placeholder('—'),
+                ->placeholder('—')
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNullableInt($state)),
 
             TextInput::make('delivery_max')
                 ->label('Доставка: до')
                 ->numeric()
                 ->minValue(0)
-                ->placeholder('—'),
+                ->placeholder('—')
+                ->dehydrateStateUsing(fn ($state) => self::normalizeNullableInt($state)),
         ])->columns(2);
     }
 
@@ -238,29 +273,53 @@ class StockItemsRelationManager extends RelationManager
                     ->formatStateUsing(fn ($state) => StockItem::availabilityOptions()[$state] ?? $state)
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('qty')->label('Залишок')->numeric()->sortable(),
-                Tables\Columns\TextColumn::make('reserved_qty')->label('Резерв')->numeric()->sortable()->toggleable(),
-                Tables\Columns\TextColumn::make('available_qty')->label('Доступно')->numeric()->sortable(),
-                Tables\Columns\TextColumn::make('sellable_qty')->label('До продажу')->numeric()->sortable(),
+                Tables\Columns\TextColumn::make('qty')
+                    ->label('Залишок')
+                    ->numeric()
+                    ->sortable(),
+
+                Tables\Columns\TextColumn::make('reserved_qty')
+                    ->label('Резерв')
+                    ->numeric()
+                    ->sortable()
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('available_qty')
+                    ->label('Доступно')
+                    ->numeric()
+                    ->sortable(),
+
+                Tables\Columns\TextColumn::make('sellable_qty')
+                    ->label('До продажу')
+                    ->numeric()
+                    ->sortable(),
 
                 Tables\Columns\TextColumn::make('price_sell')
                     ->label('Ціна')
                     ->formatStateUsing(function ($state, $record) {
-                        if ($state === null) return '—';
+                        if ($state === null) {
+                            return '—';
+                        }
+
                         $cur = strtoupper((string) ($record->currency ?? 'UAH'));
+
                         return number_format((float) $state, 2, '.', ' ') . " {$cur}";
                     })
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('price_sell_uah')
                     ->label('≈ UAH')
-                    ->formatStateUsing(fn ($state) => $state === null ? '—' : number_format((float) $state, 2, '.', ' ') . ' UAH')
+                    ->formatStateUsing(
+                        fn ($state) => $state === null
+                            ? '—'
+                            : number_format((float) $state, 2, '.', ' ') . ' UAH'
+                    )
                     ->sortable()
                     ->toggleable(),
 
                 Tables\Columns\TextColumn::make('delivery_min')
                     ->label('Доставка')
-                    ->state(fn (StockItem $r) => $r->formatDelivery())
+                    ->state(fn (StockItem $record) => $record->formatDelivery())
                     ->toggleable(),
 
                 Tables\Columns\TextColumn::make('updated_at')
@@ -280,6 +339,7 @@ class StockItemsRelationManager extends RelationManager
                             ->visible(fn () => filled($this->existingStockItemId))
                             ->action(function () {
                                 $id = (int) ($this->existingStockItemId ?? 0);
+
                                 if ($id <= 0) {
                                     return;
                                 }
@@ -294,5 +354,115 @@ class StockItemsRelationManager extends RelationManager
                 DeleteAction::make(),
             ])
             ->defaultSort('id', 'desc');
+    }
+
+    protected function buildStockSourceLocationTree(): array
+    {
+        $locations = StockSourceLocation::query()
+            ->with('source:id,name')
+            ->orderBy('stock_source_id')
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get();
+
+        /** @var Collection<int, Collection<int, StockSourceLocation>> $grouped */
+        $grouped = $locations->groupBy(fn (StockSourceLocation $location) => $location->stock_source_id ?: 0);
+
+        return $grouped
+            ->map(function (Collection $sourceLocations, $sourceId) {
+                /** @var StockSourceLocation|null $first */
+                $first = $sourceLocations->first();
+
+                $sourceName = $first?->source?->name ?: 'Без постачальника';
+
+                return [
+                    'name' => sprintf('🏢 %s (%d)', $sourceName, $sourceLocations->count()),
+                    'value' => 'source-' . $sourceId,
+                    'disabled' => true,
+                    'children' => $sourceLocations
+                        ->map(function (StockSourceLocation $location) {
+                            return [
+                                'name' => $this->formatLocationNodeLabel($location),
+                                'value' => (string) $location->id,
+                                'disabled' => false,
+                                'children' => [],
+                            ];
+                        })
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    protected function formatLocationNodeLabel(StockSourceLocation $location): string
+    {
+        $parts = [];
+
+        $parts[] = '📦 ' . $location->name;
+
+        if (filled($location->code ?? null)) {
+            $parts[] = '[' . $location->code . ']';
+        }
+
+        if (filled($location->city ?? null)) {
+            $parts[] = '— ' . $location->city;
+        }
+
+        return implode(' ', $parts);
+    }
+
+    protected static function normalizeNumberToZero(mixed $state): int|float
+    {
+        if ($state === null || $state === '') {
+            return 0;
+        }
+
+        return is_numeric($state) ? (float) $state : 0;
+    }
+
+    protected static function normalizeNumberToOne(mixed $state): int|float
+    {
+        if ($state === null || $state === '') {
+            return 1;
+        }
+
+        $value = is_numeric($state) ? (float) $state : 1;
+
+        return $value < 1 ? 1 : $value;
+    }
+
+    protected static function normalizeNullableDecimal(mixed $state): int|float|null
+    {
+        if ($state === null || $state === '') {
+            return null;
+        }
+
+        return is_numeric($state) ? (float) $state : null;
+    }
+
+    protected static function normalizeNullableInt(mixed $state): ?int
+    {
+        if ($state === null || $state === '') {
+            return null;
+        }
+
+        return is_numeric($state) ? (int) $state : null;
+    }
+
+    protected static function refreshComputedQuantities(callable $set, callable $get): void
+    {
+        $qty = (float) self::normalizeNumberToZero($get('qty'));
+        $reserved = (float) self::normalizeNumberToZero($get('reserved_qty'));
+        $multiplicity = (float) self::normalizeNumberToOne($get('multiplicity'));
+
+        $available = max($qty - $reserved, 0);
+        $sellable = $multiplicity > 0
+            ? floor($available / $multiplicity) * $multiplicity
+            : $available;
+
+        $set('available_qty', number_format($available, 3, '.', ''));
+        $set('sellable_qty', number_format($sellable, 3, '.', ''));
     }
 }
