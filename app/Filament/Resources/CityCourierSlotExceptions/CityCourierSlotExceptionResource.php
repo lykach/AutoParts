@@ -20,7 +20,7 @@ class CityCourierSlotExceptionResource extends Resource
     protected static ?string $model = CityCourierSlotException::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-calendar-days';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
 
     protected static ?string $navigationLabel = 'Курʼєр: винятки';
     protected static ?string $modelLabel = 'виняток слота доставки';

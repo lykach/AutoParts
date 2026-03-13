@@ -20,7 +20,7 @@ class StoreStockSourceResource extends Resource
     protected static ?string $model = StoreStockSource::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Склади';
 
     protected static ?string $navigationLabel = 'Склади магазинів';
     protected static ?string $modelLabel = 'склад магазину';

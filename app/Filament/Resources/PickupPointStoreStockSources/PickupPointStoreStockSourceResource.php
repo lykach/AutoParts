@@ -20,7 +20,7 @@ class PickupPointStoreStockSourceResource extends Resource
     protected static ?string $model = PickupPointStoreStockSource::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
 
     protected static ?string $navigationLabel = 'Самовивіз: джерела';
     protected static ?string $modelLabel = 'джерело самовивозу';

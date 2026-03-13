@@ -20,7 +20,7 @@ class CityCourierZoneSlotResource extends Resource
     protected static ?string $model = CityCourierZoneSlot::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clock';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
 
     protected static ?string $navigationLabel = 'Курʼєр: слоти';
     protected static ?string $modelLabel = 'слот курʼєрської доставки';

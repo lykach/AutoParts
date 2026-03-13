@@ -20,7 +20,7 @@ class CityCourierZoneResource extends Resource
     protected static ?string $model = CityCourierZone::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
 
     protected static ?string $navigationLabel = 'Курʼєр по місту';
     protected static ?string $modelLabel = 'зона курʼєрської доставки';

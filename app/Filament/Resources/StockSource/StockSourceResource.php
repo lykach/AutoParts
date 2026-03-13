@@ -28,7 +28,7 @@ class StockSourceResource extends Resource
 
     public static function getNavigationGroup(): string
     {
-        return 'Магазин';
+        return 'Склади';
     }
 
     public static function getNavigationIcon(): string|\BackedEnum|null

@@ -20,7 +20,7 @@ class DeliveryPickupPointResource extends Resource
     protected static ?string $model = DeliveryPickupPoint::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map-pin';
-    protected static string|UnitEnum|null $navigationGroup = 'Налаштування';
+    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
 
     protected static ?string $navigationLabel = 'Точки самовивозу';
     protected static ?string $modelLabel = 'точка самовивозу';
