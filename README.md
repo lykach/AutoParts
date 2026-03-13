@@ -9,7 +9,7 @@
 
 ### 💻 Технологічний стек
 * **Backend:** [Laravel 12](https://laravel.com/) (найсвіжіша версія)
-* **Admin Panel:** [Filament v3+](https://filamentphp.com/) (потужний інтерфейс управління)
+* **Admin Panel:** [Filament v5+](https://filamentphp.com/) (потужний інтерфейс управління)
 * **Database:** MySQL 8+ (використання UUID, JSON-полів та складних індексів)
 * **Architecture:** Service Layer pattern, Nested Sets для категорій.
 
