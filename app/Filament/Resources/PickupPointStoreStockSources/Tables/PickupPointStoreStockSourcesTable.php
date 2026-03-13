@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PickupPointStoreStockSources\Tables;
 
 use App\Models\DeliveryPickupPoint;
+use App\Models\Store;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -20,29 +21,70 @@ class PickupPointStoreStockSourcesTable
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('pickup_view')
+                Tables\Columns\TextColumn::make('pickup_point_view')
                     ->label('Точка самовивозу')
                     ->state(function ($record): string {
-                        $pickup = $record->pickupPoint?->name_uk ?: ('#' . (int) $record->pickup_point_id);
-                        $store = $record->pickupPoint?->store?->name_uk ?: ('#' . (int) ($record->pickupPoint?->store_id ?? 0));
-                        return "{$pickup} [{$store}]";
+                        $pickupName = $record->pickupPoint?->name_uk
+                            ?: ('#' . (int) $record->pickup_point_id);
+
+                        $storeName = $record->pickupPoint?->store?->name_uk
+                            ?: ('#' . (int) ($record->pickupPoint?->store_id ?? 0));
+
+                        $storeType = $record->pickupPoint?->store?->is_main ? 'Головний' : 'Філія';
+
+                        return $pickupName;
+                    })
+                    ->description(function ($record): string {
+                        $storeName = $record->pickupPoint?->store?->name_uk
+                            ?: ('#' . (int) ($record->pickupPoint?->store_id ?? 0));
+
+                        $storeType = $record->pickupPoint?->store?->is_main ? 'Головний' : 'Філія';
+
+                        return "{$storeName} ({$storeType})";
                     })
                     ->wrap()
                     ->searchable(query: function ($query, string $search) {
-                        return $query->whereHas('pickupPoint', fn ($q) => $q->where('name_uk', 'like', "%{$search}%"));
+                        return $query->whereHas('pickupPoint', function ($q) use ($search) {
+                            $q->where('name_uk', 'like', "%{$search}%")
+                                ->orWhere('code', 'like', "%{$search}%")
+                                ->orWhereHas('store', function ($sq) use ($search) {
+                                    $sq->where('name_uk', 'like', "%{$search}%");
+                                });
+                        });
                     }),
 
-                Tables\Columns\TextColumn::make('source_view')
+                Tables\Columns\TextColumn::make('store_stock_source_view')
                     ->label('Склад магазину')
                     ->state(function ($record): string {
-                        $store = $record->storeStockSource?->store?->name_uk ?: ('#' . (int) ($record->storeStockSource?->store_id ?? 0));
-                        $source = $record->storeStockSource?->stockSource?->name ?: ('#' . (int) ($record->storeStockSource?->stock_source_id ?? 0));
-                        $location = $record->storeStockSource?->location?->name ?: ('#' . (int) ($record->storeStockSource?->stock_source_location_id ?? 0));
-                        $city = $record->storeStockSource?->location?->city ? ' — ' . trim((string) $record->storeStockSource->location->city) : '';
+                        $storeName = $record->storeStockSource?->store?->name_uk
+                            ?: ('#' . (int) ($record->storeStockSource?->store_id ?? 0));
 
-                        return "{$store} / {$source} / {$location}{$city}";
+                        $sourceName = $record->storeStockSource?->stockSource?->name
+                            ?: ('#' . (int) ($record->storeStockSource?->stock_source_id ?? 0));
+
+                        return "{$storeName} / {$sourceName}";
                     })
-                    ->wrap(),
+                    ->description(function ($record): string {
+                        $locationName = $record->storeStockSource?->location?->name
+                            ?: ('#' . (int) ($record->storeStockSource?->stock_source_location_id ?? 0));
+
+                        $city = $record->storeStockSource?->location?->city
+                            ? trim((string) $record->storeStockSource->location->city)
+                            : null;
+
+                        return $city ? "{$locationName} — {$city}" : $locationName;
+                    })
+                    ->wrap()
+                    ->searchable(query: function ($query, string $search) {
+                        return $query->whereHas('storeStockSource', function ($q) use ($search) {
+                            $q->whereHas('store', fn ($sq) => $sq->where('name_uk', 'like', "%{$search}%"))
+                                ->orWhereHas('stockSource', fn ($sq) => $sq->where('name', 'like', "%{$search}%"))
+                                ->orWhereHas('location', function ($sq) use ($search) {
+                                    $sq->where('name', 'like', "%{$search}%")
+                                        ->orWhere('city', 'like', "%{$search}%");
+                                });
+                        });
+                    }),
 
                 Tables\Columns\TextColumn::make('eta_view')
                     ->label('Час довозу')
@@ -54,13 +96,19 @@ class PickupPointStoreStockSourcesTable
                             default => $record->transfer_time_unit,
                         };
 
-                        return "{$record->transfer_time_min}-{$record->transfer_time_max} {$unit}";
-                    }),
+                        $min = (int) $record->transfer_time_min;
+                        $max = (int) $record->transfer_time_max;
+
+                        return $min === $max
+                            ? "{$min} {$unit}"
+                            : "{$min}–{$max} {$unit}";
+                    })
+                    ->badge(),
 
                 Tables\Columns\TextColumn::make('cutoff_at')
                     ->label('Cutoff')
-                    ->sortable()
-                    ->placeholder('—'),
+                    ->state(fn ($record) => $record->cutoff_at ?: '—')
+                    ->sortable(),
 
                 Tables\Columns\TextColumn::make('priority')
                     ->label('Пріоритет')
@@ -71,6 +119,12 @@ class PickupPointStoreStockSourcesTable
                     ->label('Активно')
                     ->boolean()
                     ->sortable(),
+
+                Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Оновлено')
+                    ->dateTime('d.m.Y H:i')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('pickup_point_id')
@@ -83,6 +137,56 @@ class PickupPointStoreStockSourcesTable
                         ->pluck('name_uk', 'id')
                         ->all()
                     ),
+
+                SelectFilter::make('pickup_store_id')
+                    ->label('Магазин точки')
+                    ->options(fn () => Store::query()
+                        ->orderByDesc('is_main')
+                        ->orderBy('sort_order')
+                        ->pluck('name_uk', 'id')
+                        ->all()
+                    )
+                    ->query(function ($query, array $data) {
+                        if (! filled($data['value'] ?? null)) {
+                            return $query;
+                        }
+
+                        return $query->whereHas('pickupPoint', function ($q) use ($data) {
+                            $q->where('store_id', (int) $data['value']);
+                        });
+                    }),
+
+                SelectFilter::make('source_store_id')
+                    ->label('Магазин складу')
+                    ->options(fn () => Store::query()
+                        ->orderByDesc('is_main')
+                        ->orderBy('sort_order')
+                        ->pluck('name_uk', 'id')
+                        ->all()
+                    )
+                    ->query(function ($query, array $data) {
+                        if (! filled($data['value'] ?? null)) {
+                            return $query;
+                        }
+
+                        return $query->whereHas('storeStockSource', function ($q) use ($data) {
+                            $q->where('store_id', (int) $data['value']);
+                        });
+                    }),
+
+                SelectFilter::make('is_active')
+                    ->label('Статус')
+                    ->options([
+                        '1' => 'Активні',
+                        '0' => 'Неактивні',
+                    ])
+                    ->query(function ($query, array $data) {
+                        if (! array_key_exists('value', $data) || $data['value'] === null || $data['value'] === '') {
+                            return $query;
+                        }
+
+                        return $query->where('is_active', (bool) $data['value']);
+                    }),
             ])
             ->actions([
                 EditAction::make(),

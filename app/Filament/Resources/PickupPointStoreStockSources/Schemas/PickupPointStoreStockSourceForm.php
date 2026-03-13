@@ -47,7 +47,8 @@ class PickupPointStoreStockSourceForm
             $sourceId = (int) $row->stock_source_id;
             $sourceName = $row->stockSource?->name ?: ('Джерело #' . $sourceId);
 
-            $locationName = $row->location?->name ?: ('Локація #' . (int) $row->stock_source_location_id);
+            $locationId = (int) $row->stock_source_location_id;
+            $locationName = $row->location?->name ?: ('Локація #' . $locationId);
             $city = $row->location?->city ? trim((string) $row->location->city) : null;
 
             $leafLabel = $locationName;
@@ -151,7 +152,17 @@ class PickupPointStoreStockSourceForm
                                     filled($get('pickup_point_id')) ? (int) $get('pickup_point_id') : null
                                 ))
                                 ->helperText('Після вибору точки самовивозу показуються склади тільки її магазину.')
-                                ->dehydrateStateUsing(fn ($state) => (filled($state) && is_numeric($state)) ? (int) $state : null)
+                                ->afterStateHydrated(function ($state, $set) {
+                                    $state = filled($state) ? (string) $state : null;
+                                    $set('store_stock_source_id', $state);
+                                })
+                                ->afterStateUpdated(function ($state, $set) {
+                                    $state = filled($state) ? (string) $state : null;
+                                    $set('store_stock_source_id', $state);
+                                })
+                                ->dehydrateStateUsing(
+                                    fn ($state) => (filled($state) && is_numeric($state)) ? (int) $state : null
+                                )
                                 ->rules([
                                     function ($get, $record) {
                                         return function (string $attribute, $value, \Closure $fail) use ($get, $record) {
