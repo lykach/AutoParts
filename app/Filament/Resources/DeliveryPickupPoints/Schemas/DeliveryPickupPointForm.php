@@ -16,38 +16,13 @@ use Illuminate\Validation\Rule;
 
 class DeliveryPickupPointForm
 {
-    protected static function applyStoreDefaults($set, ?Store $store, bool $overwrite = false, ?array $currentState = null): void
+    protected static function getStore(?int $storeId): ?Store
     {
-        if (! $store) {
-            return;
+        if (! $storeId) {
+            return null;
         }
 
-        $defaults = DeliveryPickupPoint::buildPrefillFromStore($store);
-
-        foreach ([
-            'address_uk',
-            'phone',
-            'work_schedule_uk',
-        ] as $field) {
-            $current = $currentState[$field] ?? null;
-
-            if ($overwrite || blank($current)) {
-                $set($field, $defaults[$field] ?? null);
-            }
-        }
-
-        $settings = $currentState['settings'] ?? [];
-        if (! is_array($settings)) {
-            $settings = [];
-        }
-
-        $settings['prefill']['store_snapshot'] = [
-            'store_id' => $store->id,
-            'store_name' => $store->name_uk,
-            'filled_at' => now()->format('Y-m-d H:i:s'),
-        ];
-
-        $set('settings', $settings);
+        return Store::query()->find($storeId);
     }
 
     public static function configure(Schema $schema): Schema
@@ -71,43 +46,7 @@ class DeliveryPickupPointForm
                                     ->pluck('name_uk', 'id')
                                     ->all()
                                 )
-                                ->afterStateHydrated(function ($state, $set, $get) {
-                                    if (! filled($state)) {
-                                        return;
-                                    }
-
-                                    $hasOwnAddress = filled($get('address_uk'));
-                                    $hasOwnPhone = filled($get('phone'));
-                                    $hasOwnSchedule = filled($get('work_schedule_uk'));
-
-                                    if ($hasOwnAddress || $hasOwnPhone || $hasOwnSchedule) {
-                                        return;
-                                    }
-
-                                    $store = Store::query()->find((int) $state);
-
-                                    static::applyStoreDefaults($set, $store, false, [
-                                        'address_uk' => $get('address_uk'),
-                                        'phone' => $get('phone'),
-                                        'work_schedule_uk' => $get('work_schedule_uk'),
-                                        'settings' => $get('settings'),
-                                    ]);
-                                })
-                                ->afterStateUpdated(function ($state, $set, $get) {
-                                    if (! filled($state)) {
-                                        return;
-                                    }
-
-                                    $store = Store::query()->find((int) $state);
-
-                                    static::applyStoreDefaults($set, $store, false, [
-                                        'address_uk' => $get('address_uk'),
-                                        'phone' => $get('phone'),
-                                        'work_schedule_uk' => $get('work_schedule_uk'),
-                                        'settings' => $get('settings'),
-                                    ]);
-                                })
-                                ->helperText('Після вибору магазину адреса, телефон і графік автоматично підтягнуться, якщо ці поля ще порожні.'),
+                                ->helperText('Телефон, адреса і графік можуть братися напряму з цього магазину. Тоді при зміні магазину вони оновляться автоматично.'),
 
                             TextInput::make('code')
                                 ->label('Код')
@@ -126,10 +65,6 @@ class DeliveryPickupPointForm
                                 ->label('Порядок сортування')
                                 ->numeric()
                                 ->default(100),
-
-                            TextInput::make('phone')
-                                ->label('Телефон')
-                                ->maxLength(50),
                         ]),
 
                     Section::make('Назви для фронтенда')
@@ -151,12 +86,58 @@ class DeliveryPickupPointForm
                 ]),
 
                 Grid::make(['default' => 1, 'lg' => 2])->schema([
+                    Section::make('Телефон')
+                        ->columnSpan(['default' => 1, 'lg' => 1])
+                        ->schema([
+                            Toggle::make('settings.inherit.phone')
+                                ->label('Брати телефон із магазину')
+                                ->default(true)
+                                ->live()
+                                ->helperText('Рекомендовано. Тоді номер автоматично оновлюється після змін у магазині.'),
+
+                            TextInput::make('phone')
+                                ->label('Власний телефон точки')
+                                ->maxLength(50)
+                                ->disabled(fn ($get) => (bool) $get('settings.inherit.phone'))
+                                ->helperText(function ($get) {
+                                    if (! (bool) $get('settings.inherit.phone')) {
+                                        return 'Використовується власний телефон точки самовивозу.';
+                                    }
+
+                                    $store = static::getStore((int) ($get('store_id') ?? 0));
+                                    $phone = DeliveryPickupPoint::extractPrimaryPhoneFromStore($store);
+
+                                    return $phone
+                                        ? "Зараз буде використано номер магазину: {$phone}"
+                                        : 'У магазині номер не заповнений.';
+                                }),
+                        ]),
+
                     Section::make('Адреса')
                         ->columnSpan(['default' => 1, 'lg' => 1])
                         ->schema([
+                            Toggle::make('settings.inherit.address_uk')
+                                ->label('Брати адресу із магазину')
+                                ->default(true)
+                                ->live()
+                                ->helperText('Рекомендовано. Адреса завжди буде актуальною після змін у магазині.'),
+
                             TextInput::make('address_uk')
-                                ->label('Адреса (UK)')
-                                ->maxLength(255),
+                                ->label('Власна адреса (UK)')
+                                ->maxLength(255)
+                                ->disabled(fn ($get) => (bool) $get('settings.inherit.address_uk'))
+                                ->helperText(function ($get) {
+                                    if (! (bool) $get('settings.inherit.address_uk')) {
+                                        return 'Використовується власна адреса точки самовивозу.';
+                                    }
+
+                                    $store = static::getStore((int) ($get('store_id') ?? 0));
+                                    $address = DeliveryPickupPoint::buildAddressUkFromStore($store);
+
+                                    return $address
+                                        ? "Зараз буде використано адресу магазину: {$address}"
+                                        : 'У магазині адреса не заповнена.';
+                                }),
 
                             TextInput::make('address_en')
                                 ->label('Адреса (EN)')
@@ -166,30 +147,48 @@ class DeliveryPickupPointForm
                                 ->label('Адреса (RU)')
                                 ->maxLength(255),
                         ]),
-
-                    Section::make('Графік роботи')
-                        ->columnSpan(['default' => 1, 'lg' => 1])
-                        ->schema([
-                            Textarea::make('work_schedule_uk')
-                                ->label('Графік (UK)')
-                                ->rows(6),
-
-                            Textarea::make('work_schedule_en')
-                                ->label('Графік (EN)')
-                                ->rows(6),
-
-                            Textarea::make('work_schedule_ru')
-                                ->label('Графік (RU)')
-                                ->rows(6),
-                        ]),
                 ]),
+
+                Section::make('Графік роботи')
+                    ->schema([
+                        Toggle::make('settings.inherit.work_schedule_uk')
+                            ->label('Брати графік і святкові дні із магазину')
+                            ->default(true)
+                            ->live()
+                            ->helperText('Рекомендовано. Підтягується регулярний графік + святкові дні / винятки з магазину.'),
+
+                        Textarea::make('work_schedule_uk')
+                            ->label('Власний графік (UK)')
+                            ->rows(10)
+                            ->disabled(fn ($get) => (bool) $get('settings.inherit.work_schedule_uk'))
+                            ->helperText(function ($get) {
+                                if (! (bool) $get('settings.inherit.work_schedule_uk')) {
+                                    return 'Використовується власний графік точки самовивозу.';
+                                }
+
+                                $store = static::getStore((int) ($get('store_id') ?? 0));
+                                $schedule = DeliveryPickupPoint::buildWorkScheduleUkFromStore($store);
+
+                                return $schedule
+                                    ? 'Зараз використовується живий графік магазину, включно зі святковими днями.'
+                                    : 'У магазині графік ще не заповнений.';
+                            }),
+
+                        Textarea::make('work_schedule_en')
+                            ->label('Графік (EN)')
+                            ->rows(4),
+
+                        Textarea::make('work_schedule_ru')
+                            ->label('Графік (RU)')
+                            ->rows(4),
+                    ]),
 
                 Section::make('Додатково')
                     ->schema([
                         KeyValue::make('settings')
                             ->label('settings')
                             ->default([])
-                            ->helperText('Резерв під майбутні налаштування точки самовивозу.'),
+                            ->helperText('Службові налаштування точки самовивозу. Блок inherit використовується для живого успадкування від магазину.'),
                     ]),
             ]);
     }

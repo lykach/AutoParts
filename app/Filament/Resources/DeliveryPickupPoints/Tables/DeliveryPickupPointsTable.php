@@ -40,8 +40,15 @@ class DeliveryPickupPointsTable
                         return $query->whereHas('store', fn ($q) => $q->where('name_uk', 'like', "%{$search}%"));
                     }),
 
-                Tables\Columns\TextColumn::make('address_uk')
+                Tables\Columns\TextColumn::make('resolved_phone')
+                    ->label('Телефон')
+                    ->placeholder('—')
+                    ->wrap()
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('resolved_address_uk')
                     ->label('Адреса')
+                    ->placeholder('—')
                     ->wrap()
                     ->toggleable(),
 

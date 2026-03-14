@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class DeliveryPickupPoint extends Model
@@ -40,6 +41,12 @@ class DeliveryPickupPoint extends Model
         'settings' => 'array',
     ];
 
+    protected $appends = [
+        'resolved_phone',
+        'resolved_address_uk',
+        'resolved_work_schedule_uk',
+    ];
+
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class, 'store_id');
@@ -47,14 +54,7 @@ class DeliveryPickupPoint extends Model
 
     public function stockSourceLinks(): HasMany
     {
-        return $this->hasMany(PickupPointStoreStockSource::class, 'pickup_point_id')
-            ->with([
-                'storeStockSource.store',
-                'storeStockSource.stockSource',
-                'storeStockSource.location',
-            ])
-            ->orderBy('priority')
-            ->orderBy('id');
+        return $this->hasMany(PickupPointStoreStockSource::class, 'pickup_point_id');
     }
 
     public function scopeActive(Builder $q): Builder
@@ -62,17 +62,36 @@ class DeliveryPickupPoint extends Model
         return $q->where('is_active', true);
     }
 
-    public static function buildPrefillFromStore(?Store $store): array
+    public function getResolvedPhoneAttribute(): ?string
     {
-        if (! $store) {
-            return [];
+        if (! $this->shouldInherit('phone')) {
+            return filled($this->phone) ? trim((string) $this->phone) : null;
         }
 
-        return [
-            'address_uk' => static::buildAddressUkFromStore($store),
-            'phone' => static::extractPrimaryPhoneFromStore($store),
-            'work_schedule_uk' => static::buildWorkScheduleUkFromStore($store),
-        ];
+        return static::extractPrimaryPhoneFromStore($this->store);
+    }
+
+    public function getResolvedAddressUkAttribute(): ?string
+    {
+        if (! $this->shouldInherit('address_uk')) {
+            return filled($this->address_uk) ? trim((string) $this->address_uk) : null;
+        }
+
+        return static::buildAddressUkFromStore($this->store);
+    }
+
+    public function getResolvedWorkScheduleUkAttribute(): ?string
+    {
+        if (! $this->shouldInherit('work_schedule_uk')) {
+            return filled($this->work_schedule_uk) ? trim((string) $this->work_schedule_uk) : null;
+        }
+
+        return static::buildWorkScheduleUkFromStore($this->store);
+    }
+
+    public function shouldInherit(string $field): bool
+    {
+        return (bool) data_get($this->settings ?? [], "inherit.$field", true);
     }
 
     public static function buildAddressUkFromStore(?Store $store): ?string
@@ -125,10 +144,6 @@ class DeliveryPickupPoint extends Model
         $workingHours = is_array($store->working_hours) ? $store->working_hours : [];
         $days = data_get($workingHours, 'days', []);
 
-        if (! is_array($days) || empty($days)) {
-            return null;
-        }
-
         $dayLabels = [
             'mon' => 'Пн',
             'tue' => 'Вт',
@@ -139,54 +154,113 @@ class DeliveryPickupPoint extends Model
             'sun' => 'Нд',
         ];
 
-        $lines = [];
+        $regularLines = [];
 
-        foreach ($days as $day) {
-            $code = $day['day'] ?? null;
-            if (! $code || ! isset($dayLabels[$code])) {
-                continue;
-            }
+        if (is_array($days)) {
+            foreach ($days as $day) {
+                $code = $day['day'] ?? null;
 
-            $label = $dayLabels[$code];
-            $isClosed = (bool) ($day['is_closed'] ?? false);
-            $note = filled($day['note'] ?? null) ? trim((string) $day['note']) : null;
+                if (! $code || ! isset($dayLabels[$code])) {
+                    continue;
+                }
 
-            if ($isClosed) {
-                $line = "{$label}: вихідний";
+                $label = $dayLabels[$code];
+                $isClosed = (bool) ($day['is_closed'] ?? false);
+                $note = filled($day['note'] ?? null) ? trim((string) $day['note']) : null;
+
+                if ($isClosed) {
+                    $line = "{$label}: вихідний";
+                    if ($note) {
+                        $line .= " ({$note})";
+                    }
+
+                    $regularLines[] = $line;
+                    continue;
+                }
+
+                $intervals = is_array($day['intervals'] ?? null) ? $day['intervals'] : [];
+                $intervalStrings = [];
+
+                foreach ($intervals as $interval) {
+                    $from = trim((string) ($interval['from'] ?? ''));
+                    $to = trim((string) ($interval['to'] ?? ''));
+
+                    if ($from !== '' && $to !== '') {
+                        $intervalStrings[] = "{$from}-{$to}";
+                    }
+                }
+
+                $line = empty($intervalStrings)
+                    ? "{$label}: за графіком"
+                    : "{$label}: " . implode(', ', $intervalStrings);
+
                 if ($note) {
                     $line .= " ({$note})";
                 }
 
-                $lines[] = $line;
+                $regularLines[] = $line;
+            }
+        }
+
+        $exceptionLines = [];
+        $exceptions = is_array($store->working_exceptions) ? $store->working_exceptions : [];
+
+        foreach ($exceptions as $exception) {
+            $dateRaw = $exception['date'] ?? null;
+            if (! filled($dateRaw)) {
                 continue;
             }
 
-            $intervals = is_array($day['intervals'] ?? null) ? $day['intervals'] : [];
-            $intervalStrings = [];
-
-            foreach ($intervals as $interval) {
-                $from = trim((string) ($interval['from'] ?? ''));
-                $to = trim((string) ($interval['to'] ?? ''));
-
-                if ($from !== '' && $to !== '') {
-                    $intervalStrings[] = "{$from}-{$to}";
-                }
+            try {
+                $date = Carbon::parse($dateRaw)->format('d.m.Y');
+            } catch (\Throwable) {
+                $date = (string) $dateRaw;
             }
 
-            if (empty($intervalStrings)) {
-                $line = "{$label}: за графіком";
+            $title = filled($exception['title'] ?? null) ? trim((string) $exception['title']) : null;
+            $note = filled($exception['note'] ?? null) ? trim((string) $exception['note']) : null;
+            $isClosed = (bool) ($exception['is_closed'] ?? false);
+
+            if ($isClosed) {
+                $line = "{$date} — вихідний";
             } else {
-                $line = "{$label}: " . implode(', ', $intervalStrings);
+                $intervals = is_array($exception['intervals'] ?? null) ? $exception['intervals'] : [];
+                $intervalStrings = [];
+
+                foreach ($intervals as $interval) {
+                    $from = trim((string) ($interval['from'] ?? ''));
+                    $to = trim((string) ($interval['to'] ?? ''));
+
+                    if ($from !== '' && $to !== '') {
+                        $intervalStrings[] = "{$from}-{$to}";
+                    }
+                }
+
+                $line = "{$date} — " . (empty($intervalStrings) ? 'спецграфік' : implode(', ', $intervalStrings));
+            }
+
+            if ($title) {
+                $line .= " ({$title})";
             }
 
             if ($note) {
-                $line .= " ({$note})";
+                $line .= " — {$note}";
             }
 
-            $lines[] = $line;
+            $exceptionLines[] = $line;
         }
 
-        return empty($lines) ? null : implode(PHP_EOL, $lines);
+        $result = [];
+
+        if (! empty($regularLines)) {
+            $result[] = implode(PHP_EOL, $regularLines);
+        }
+
+        if (! empty($exceptionLines)) {
+            $result[] = 'Святкові дні / винятки:' . PHP_EOL . implode(PHP_EOL, $exceptionLines);
+        }
+
+        return empty($result) ? null : implode(PHP_EOL . PHP_EOL, $result);
     }
 
     protected static function booted(): void
@@ -208,7 +282,15 @@ class DeliveryPickupPoint extends Model
             $row->work_schedule_ru = filled($row->work_schedule_ru) ? trim((string) $row->work_schedule_ru) : null;
 
             $row->sort_order = filled($row->sort_order) ? (int) $row->sort_order : 100;
-            $row->settings = is_array($row->settings) ? $row->settings : [];
+
+            $settings = is_array($row->settings) ? $row->settings : [];
+            $settings['inherit'] = array_merge([
+                'phone' => true,
+                'address_uk' => true,
+                'work_schedule_uk' => true,
+            ], is_array($settings['inherit'] ?? null) ? $settings['inherit'] : []);
+
+            $row->settings = $settings;
 
             if (! filled($row->code)) {
                 $storeId = (int) $row->store_id;
