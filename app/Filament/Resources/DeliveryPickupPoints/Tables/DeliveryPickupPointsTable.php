@@ -24,6 +24,7 @@ class DeliveryPickupPointsTable
                     ->label('Точка самовивозу')
                     ->searchable()
                     ->sortable()
+                    ->wrap()
                     ->description(fn ($record): string => $record->code),
 
                 Tables\Columns\TextColumn::make('store_view')
@@ -31,6 +32,7 @@ class DeliveryPickupPointsTable
                     ->state(function ($record): string {
                         $name = $record->store?->name_uk ?: ('#' . (int) $record->store_id);
                         $type = $record->store?->is_main ? 'Головний' : 'Філія';
+
                         return "{$name} ({$type})";
                     })
                     ->wrap()
@@ -43,10 +45,40 @@ class DeliveryPickupPointsTable
                     ->wrap()
                     ->toggleable(),
 
-                Tables\Columns\TextColumn::make('stock_source_links_count')
-                    ->label('Джерел')
-                    ->numeric()
-                    ->sortable(),
+                Tables\Columns\TextColumn::make('sources_view')
+                    ->label('Джерела')
+                    ->state(function ($record): string {
+                        $all = (int) ($record->stock_source_links_count ?? 0);
+                        $active = (int) ($record->active_stock_source_links_count ?? 0);
+
+                        return "{$active} / {$all}";
+                    })
+                    ->badge()
+                    ->color(function ($record): string {
+                        $all = (int) ($record->stock_source_links_count ?? 0);
+                        $active = (int) ($record->active_stock_source_links_count ?? 0);
+
+                        if ($all === 0) {
+                            return 'danger';
+                        }
+
+                        if ($active === 0) {
+                            return 'warning';
+                        }
+
+                        return 'success';
+                    })
+                    ->sortable(query: function ($query, string $direction) {
+                        return $query
+                            ->orderBy('active_stock_source_links_count', $direction)
+                            ->orderBy('stock_source_links_count', $direction);
+                    })
+                    ->tooltip(function ($record): string {
+                        $all = (int) ($record->stock_source_links_count ?? 0);
+                        $active = (int) ($record->active_stock_source_links_count ?? 0);
+
+                        return "Активних: {$active}, всього: {$all}";
+                    }),
 
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('Активно')
@@ -57,6 +89,12 @@ class DeliveryPickupPointsTable
                     ->label('Сортування')
                     ->numeric()
                     ->sortable(),
+
+                Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Оновлено')
+                    ->dateTime('d.m.Y H:i')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 SelectFilter::make('store_id')

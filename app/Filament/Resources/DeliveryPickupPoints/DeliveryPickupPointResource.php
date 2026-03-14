@@ -5,6 +5,7 @@ namespace App\Filament\Resources\DeliveryPickupPoints;
 use App\Filament\Resources\DeliveryPickupPoints\Pages\CreateDeliveryPickupPoint;
 use App\Filament\Resources\DeliveryPickupPoints\Pages\EditDeliveryPickupPoint;
 use App\Filament\Resources\DeliveryPickupPoints\Pages\ListDeliveryPickupPoints;
+use App\Filament\Resources\DeliveryPickupPoints\RelationManagers\PickupSourcesRelationManager;
 use App\Filament\Resources\DeliveryPickupPoints\Schemas\DeliveryPickupPointForm;
 use App\Filament\Resources\DeliveryPickupPoints\Tables\DeliveryPickupPointsTable;
 use App\Models\DeliveryPickupPoint;
@@ -35,7 +36,10 @@ class DeliveryPickupPointResource extends Resource
     {
         return parent::getEloquentQuery()
             ->with(['store'])
-            ->withCount('stockSourceLinks');
+            ->withCount([
+                'stockSourceLinks',
+                'stockSourceLinks as active_stock_source_links_count' => fn (Builder $query) => $query->where('is_active', true),
+            ]);
     }
 
     public static function form(Schema $schema): Schema
@@ -46,6 +50,13 @@ class DeliveryPickupPointResource extends Resource
     public static function table(Table $table): Table
     {
         return DeliveryPickupPointsTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            PickupSourcesRelationManager::class,
+        ];
     }
 
     public static function getNavigationBadge(): ?string

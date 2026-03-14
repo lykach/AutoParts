@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Store\Schemas;
 
 use App\Filament\Forms\Components\PhoneInput;
 use App\Models\Store;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Repeater;
@@ -606,54 +607,181 @@ class StoreForm
                         Tab::make('Графік')->schema([
                             static::inheritedNotice('working_hours'),
 
-                            Section::make('Графік роботи')->schema([
-                                Repeater::make('working_hours.days')
-                                    ->label('Дні тижня')
-                                    ->disabled(fn ($get) => $disabledIfInherited($get, 'working_hours'))
-                                    ->default(function () {
-                                        return [
-                                            ['day' => 'mon', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
-                                            ['day' => 'tue', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
-                                            ['day' => 'wed', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
-                                            ['day' => 'thu', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
-                                            ['day' => 'fri', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
-                                            ['day' => 'sat', 'is_closed' => true, 'intervals' => [], 'note' => null],
-                                            ['day' => 'sun', 'is_closed' => true, 'intervals' => [], 'note' => null],
-                                        ];
-                                    })
-                                    ->schema([
-                                        Grid::make(['default' => 1, 'md' => 4])->schema([
-                                            Select::make('day')->label('День')->options([
-                                                'mon' => 'Пн', 'tue' => 'Вт', 'wed' => 'Ср', 'thu' => 'Чт', 'fri' => 'Пт', 'sat' => 'Сб', 'sun' => 'Нд',
-                                            ])->required(),
+                            Section::make('Регулярний графік роботи')
+                                ->description('Базовий щотижневий графік магазину.')
+                                ->schema([
+                                    Repeater::make('working_hours.days')
+                                        ->label('Дні тижня')
+                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'working_hours'))
+                                        ->default(function () {
+                                            return [
+                                                ['day' => 'mon', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
+                                                ['day' => 'tue', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
+                                                ['day' => 'wed', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
+                                                ['day' => 'thu', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
+                                                ['day' => 'fri', 'is_closed' => false, 'intervals' => [['from' => '09:00', 'to' => '18:00']], 'note' => null],
+                                                ['day' => 'sat', 'is_closed' => true, 'intervals' => [], 'note' => null],
+                                                ['day' => 'sun', 'is_closed' => true, 'intervals' => [], 'note' => null],
+                                            ];
+                                        })
+                                        ->schema([
+                                            Grid::make(['default' => 1, 'md' => 4])->schema([
+                                                Select::make('day')->label('День')->options([
+                                                    'mon' => 'Пн',
+                                                    'tue' => 'Вт',
+                                                    'wed' => 'Ср',
+                                                    'thu' => 'Чт',
+                                                    'fri' => 'Пт',
+                                                    'sat' => 'Сб',
+                                                    'sun' => 'Нд',
+                                                ])->required(),
 
-                                            Toggle::make('is_closed')
-                                                ->label('Вихідний')
-                                                ->live()
-                                                ->afterStateUpdated(fn ($s, $set) => $s ? $set('intervals', []) : null),
+                                                Toggle::make('is_closed')
+                                                    ->label('Вихідний')
+                                                    ->live()
+                                                    ->afterStateUpdated(fn ($s, $set) => $s ? $set('intervals', []) : null),
 
-                                            TextInput::make('note')
-                                                ->label('Примітка')
-                                                ->maxLength(255)
-                                                ->columnSpan(['default' => 1, 'md' => 2]),
-                                        ]),
+                                                TextInput::make('note')
+                                                    ->label('Примітка')
+                                                    ->maxLength(255)
+                                                    ->columnSpan(['default' => 1, 'md' => 2]),
+                                            ]),
 
-                                        Repeater::make('intervals')
-                                            ->label('Інтервали')
-                                            ->visible(fn ($get) => ! (bool) $get('is_closed'))
-                                            ->defaultItems(1)
-                                            ->schema([
-                                                Grid::make(['default' => 1, 'md' => 2])->schema([
-                                                    TextInput::make('from')->label('З')->mask('99:99')->required()->maxLength(5),
-                                                    TextInput::make('to')->label('До')->mask('99:99')->required()->maxLength(5),
-                                                ]),
-                                            ])
-                                            ->reorderable()
-                                            ->collapsible(),
-                                    ])
-                                    ->reorderable(false)
-                                    ->collapsible(),
-                            ]),
+                                            Repeater::make('intervals')
+                                                ->label('Інтервали')
+                                                ->visible(fn ($get) => ! (bool) $get('is_closed'))
+                                                ->defaultItems(1)
+                                                ->schema([
+                                                    Grid::make(['default' => 1, 'md' => 2])->schema([
+                                                        TextInput::make('from')
+                                                            ->label('З')
+                                                            ->mask('99:99')
+                                                            ->required()
+                                                            ->maxLength(5),
+
+                                                        TextInput::make('to')
+                                                            ->label('До')
+                                                            ->mask('99:99')
+                                                            ->required()
+                                                            ->maxLength(5),
+                                                    ]),
+                                                ])
+                                                ->reorderable()
+                                                ->collapsible(),
+                                        ])
+                                        ->reorderable(false)
+                                        ->collapsible(),
+                                ]),
+
+                            Section::make('Святкові дні та винятки')
+                                ->description('Разові виключення з регулярного графіка: свята, скорочені дні, переноси, спеціальні години роботи.')
+                                ->schema([
+                                    Repeater::make('working_exceptions')
+                                        ->label('Винятки')
+                                        ->disabled(fn ($get) => $disabledIfInherited($get, 'working_hours'))
+                                        ->defaultItems(0)
+                                        ->collapsed()
+                                        ->itemLabel(function (array $state): ?string {
+                                            $title = trim((string) ($state['title'] ?? ''));
+                                            $date = $state['date'] ?? null;
+                                            $type = $state['type'] ?? null;
+
+                                            $typeLabel = match ($type) {
+                                                'holiday' => 'Свято',
+                                                'special' => 'Спецграфік',
+                                                'closed' => 'Зачинено',
+                                                default => 'Виняток',
+                                            };
+
+                                            if ($title !== '' && $date) {
+                                                return "{$typeLabel}: {$title} ({$date})";
+                                            }
+
+                                            if ($title !== '') {
+                                                return "{$typeLabel}: {$title}";
+                                            }
+
+                                            if ($date) {
+                                                return "{$typeLabel}: {$date}";
+                                            }
+
+                                            return $typeLabel;
+                                        })
+                                        ->schema([
+                                            Grid::make(['default' => 1, 'md' => 3])->schema([
+                                                Select::make('type')
+                                                    ->label('Тип')
+                                                    ->options([
+                                                        'holiday' => 'Святковий день',
+                                                        'special' => 'Спеціальний графік',
+                                                        'closed' => 'Повністю зачинено',
+                                                    ])
+                                                    ->default('holiday')
+                                                    ->required(),
+
+                                                DatePicker::make('date')
+                                                    ->label('Дата')
+                                                    ->native(false)
+                                                    ->displayFormat('d.m.Y')
+                                                    ->required(),
+
+                                                Toggle::make('is_closed')
+                                                    ->label('Не працює цього дня')
+                                                    ->default(true)
+                                                    ->live()
+                                                    ->afterStateUpdated(function ($state, $set, $get) {
+                                                        if ($state) {
+                                                            $set('intervals', []);
+                                                            return;
+                                                        }
+
+                                                        $intervals = $get('intervals');
+                                                        if (! is_array($intervals) || empty($intervals)) {
+                                                            $set('intervals', [['from' => '09:00', 'to' => '18:00']]);
+                                                        }
+                                                    }),
+                                            ]),
+
+                                            Grid::make(['default' => 1, 'md' => 2])->schema([
+                                                TextInput::make('title')
+                                                    ->label('Назва / причина')
+                                                    ->maxLength(255)
+                                                    ->placeholder('Напр. Різдво, Великдень, інвентаризація')
+                                                    ->columnSpanFull(),
+
+                                                TextInput::make('note')
+                                                    ->label('Примітка для менеджера / сайту')
+                                                    ->maxLength(255)
+                                                    ->placeholder('Напр. Самовивіз недоступний')
+                                                    ->columnSpanFull(),
+                                            ]),
+
+                                            Repeater::make('intervals')
+                                                ->label('Інтервали роботи у цей день')
+                                                ->visible(fn ($get) => ! (bool) $get('is_closed'))
+                                                ->defaultItems(1)
+                                                ->schema([
+                                                    Grid::make(['default' => 1, 'md' => 2])->schema([
+                                                        TextInput::make('from')
+                                                            ->label('З')
+                                                            ->mask('99:99')
+                                                            ->required()
+                                                            ->maxLength(5),
+
+                                                        TextInput::make('to')
+                                                            ->label('До')
+                                                            ->mask('99:99')
+                                                            ->required()
+                                                            ->maxLength(5),
+                                                    ]),
+                                                ])
+                                                ->reorderable()
+                                                ->collapsible(),
+                                        ])
+                                        ->addActionLabel('Додати виняток / свято')
+                                        ->reorderable()
+                                        ->collapsible(),
+                                ]),
                         ]),
 
                         Tab::make('Юридичні')->schema([

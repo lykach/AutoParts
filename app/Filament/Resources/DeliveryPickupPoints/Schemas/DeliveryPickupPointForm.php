@@ -5,10 +5,10 @@ namespace App\Filament\Resources\DeliveryPickupPoints\Schemas;
 use App\Models\DeliveryPickupPoint;
 use App\Models\Store;
 use Filament\Forms\Components\KeyValue;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Components\Select;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -16,6 +16,40 @@ use Illuminate\Validation\Rule;
 
 class DeliveryPickupPointForm
 {
+    protected static function applyStoreDefaults($set, ?Store $store, bool $overwrite = false, ?array $currentState = null): void
+    {
+        if (! $store) {
+            return;
+        }
+
+        $defaults = DeliveryPickupPoint::buildPrefillFromStore($store);
+
+        foreach ([
+            'address_uk',
+            'phone',
+            'work_schedule_uk',
+        ] as $field) {
+            $current = $currentState[$field] ?? null;
+
+            if ($overwrite || blank($current)) {
+                $set($field, $defaults[$field] ?? null);
+            }
+        }
+
+        $settings = $currentState['settings'] ?? [];
+        if (! is_array($settings)) {
+            $settings = [];
+        }
+
+        $settings['prefill']['store_snapshot'] = [
+            'store_id' => $store->id,
+            'store_name' => $store->name_uk,
+            'filled_at' => now()->format('Y-m-d H:i:s'),
+        ];
+
+        $set('settings', $settings);
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -30,12 +64,50 @@ class DeliveryPickupPointForm
                                 ->required()
                                 ->searchable()
                                 ->preload()
+                                ->live()
                                 ->options(fn () => Store::query()
                                     ->orderByDesc('is_main')
                                     ->orderBy('sort_order')
                                     ->pluck('name_uk', 'id')
                                     ->all()
-                                ),
+                                )
+                                ->afterStateHydrated(function ($state, $set, $get) {
+                                    if (! filled($state)) {
+                                        return;
+                                    }
+
+                                    $hasOwnAddress = filled($get('address_uk'));
+                                    $hasOwnPhone = filled($get('phone'));
+                                    $hasOwnSchedule = filled($get('work_schedule_uk'));
+
+                                    if ($hasOwnAddress || $hasOwnPhone || $hasOwnSchedule) {
+                                        return;
+                                    }
+
+                                    $store = Store::query()->find((int) $state);
+
+                                    static::applyStoreDefaults($set, $store, false, [
+                                        'address_uk' => $get('address_uk'),
+                                        'phone' => $get('phone'),
+                                        'work_schedule_uk' => $get('work_schedule_uk'),
+                                        'settings' => $get('settings'),
+                                    ]);
+                                })
+                                ->afterStateUpdated(function ($state, $set, $get) {
+                                    if (! filled($state)) {
+                                        return;
+                                    }
+
+                                    $store = Store::query()->find((int) $state);
+
+                                    static::applyStoreDefaults($set, $store, false, [
+                                        'address_uk' => $get('address_uk'),
+                                        'phone' => $get('phone'),
+                                        'work_schedule_uk' => $get('work_schedule_uk'),
+                                        'settings' => $get('settings'),
+                                    ]);
+                                })
+                                ->helperText('Після вибору магазину адреса, телефон і графік автоматично підтягнуться, якщо ці поля ще порожні.'),
 
                             TextInput::make('code')
                                 ->label('Код')
@@ -100,15 +172,15 @@ class DeliveryPickupPointForm
                         ->schema([
                             Textarea::make('work_schedule_uk')
                                 ->label('Графік (UK)')
-                                ->rows(3),
+                                ->rows(6),
 
                             Textarea::make('work_schedule_en')
                                 ->label('Графік (EN)')
-                                ->rows(3),
+                                ->rows(6),
 
                             Textarea::make('work_schedule_ru')
                                 ->label('Графік (RU)')
-                                ->rows(3),
+                                ->rows(6),
                         ]),
                 ]),
 

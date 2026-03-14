@@ -47,12 +47,146 @@ class DeliveryPickupPoint extends Model
 
     public function stockSourceLinks(): HasMany
     {
-        return $this->hasMany(PickupPointStoreStockSource::class, 'pickup_point_id');
+        return $this->hasMany(PickupPointStoreStockSource::class, 'pickup_point_id')
+            ->with([
+                'storeStockSource.store',
+                'storeStockSource.stockSource',
+                'storeStockSource.location',
+            ])
+            ->orderBy('priority')
+            ->orderBy('id');
     }
 
     public function scopeActive(Builder $q): Builder
     {
         return $q->where('is_active', true);
+    }
+
+    public static function buildPrefillFromStore(?Store $store): array
+    {
+        if (! $store) {
+            return [];
+        }
+
+        return [
+            'address_uk' => static::buildAddressUkFromStore($store),
+            'phone' => static::extractPrimaryPhoneFromStore($store),
+            'work_schedule_uk' => static::buildWorkScheduleUkFromStore($store),
+        ];
+    }
+
+    public static function buildAddressUkFromStore(?Store $store): ?string
+    {
+        if (! $store) {
+            return null;
+        }
+
+        $parts = array_filter([
+            filled($store->country_name) ? trim((string) $store->country_name) : null,
+            filled($store->region) ? trim((string) $store->region) : null,
+            filled($store->city) ? trim((string) $store->city) : null,
+            filled($store->address_line1) ? trim((string) $store->address_line1) : null,
+            filled($store->address_line2) ? trim((string) $store->address_line2) : null,
+            filled($store->postal_code) ? 'Індекс: ' . trim((string) $store->postal_code) : null,
+        ], fn ($value) => filled($value));
+
+        if (empty($parts)) {
+            return null;
+        }
+
+        return implode(', ', $parts);
+    }
+
+    public static function extractPrimaryPhoneFromStore(?Store $store): ?string
+    {
+        if (! $store) {
+            return null;
+        }
+
+        $phones = is_array($store->phones) ? $store->phones : [];
+        if (empty($phones)) {
+            return null;
+        }
+
+        $primary = collect($phones)->firstWhere('is_primary', true);
+        $first = $phones[0] ?? null;
+
+        $number = $primary['number'] ?? ($first['number'] ?? null);
+
+        return filled($number) ? trim((string) $number) : null;
+    }
+
+    public static function buildWorkScheduleUkFromStore(?Store $store): ?string
+    {
+        if (! $store) {
+            return null;
+        }
+
+        $workingHours = is_array($store->working_hours) ? $store->working_hours : [];
+        $days = data_get($workingHours, 'days', []);
+
+        if (! is_array($days) || empty($days)) {
+            return null;
+        }
+
+        $dayLabels = [
+            'mon' => 'Пн',
+            'tue' => 'Вт',
+            'wed' => 'Ср',
+            'thu' => 'Чт',
+            'fri' => 'Пт',
+            'sat' => 'Сб',
+            'sun' => 'Нд',
+        ];
+
+        $lines = [];
+
+        foreach ($days as $day) {
+            $code = $day['day'] ?? null;
+            if (! $code || ! isset($dayLabels[$code])) {
+                continue;
+            }
+
+            $label = $dayLabels[$code];
+            $isClosed = (bool) ($day['is_closed'] ?? false);
+            $note = filled($day['note'] ?? null) ? trim((string) $day['note']) : null;
+
+            if ($isClosed) {
+                $line = "{$label}: вихідний";
+                if ($note) {
+                    $line .= " ({$note})";
+                }
+
+                $lines[] = $line;
+                continue;
+            }
+
+            $intervals = is_array($day['intervals'] ?? null) ? $day['intervals'] : [];
+            $intervalStrings = [];
+
+            foreach ($intervals as $interval) {
+                $from = trim((string) ($interval['from'] ?? ''));
+                $to = trim((string) ($interval['to'] ?? ''));
+
+                if ($from !== '' && $to !== '') {
+                    $intervalStrings[] = "{$from}-{$to}";
+                }
+            }
+
+            if (empty($intervalStrings)) {
+                $line = "{$label}: за графіком";
+            } else {
+                $line = "{$label}: " . implode(', ', $intervalStrings);
+            }
+
+            if ($note) {
+                $line .= " ({$note})";
+            }
+
+            $lines[] = $line;
+        }
+
+        return empty($lines) ? null : implode(PHP_EOL, $lines);
     }
 
     protected static function booted(): void
