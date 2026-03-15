@@ -19,16 +19,10 @@ class DeliveryPickupPoint extends Model
     protected $fillable = [
         'store_id',
         'code',
-        'name_uk',
-        'name_en',
-        'name_ru',
-        'address_uk',
-        'address_en',
-        'address_ru',
+        'name',
+        'address',
         'phone',
-        'work_schedule_uk',
-        'work_schedule_en',
-        'work_schedule_ru',
+        'work_schedule',
         'is_active',
         'sort_order',
         'settings',
@@ -43,8 +37,8 @@ class DeliveryPickupPoint extends Model
 
     protected $appends = [
         'resolved_phone',
-        'resolved_address_uk',
-        'resolved_work_schedule_uk',
+        'resolved_address',
+        'resolved_work_schedule',
     ];
 
     public function store(): BelongsTo
@@ -71,22 +65,22 @@ class DeliveryPickupPoint extends Model
         return static::extractPrimaryPhoneFromStore($this->store);
     }
 
-    public function getResolvedAddressUkAttribute(): ?string
+    public function getResolvedAddressAttribute(): ?string
     {
-        if (! $this->shouldInherit('address_uk')) {
-            return filled($this->address_uk) ? trim((string) $this->address_uk) : null;
+        if (! $this->shouldInherit('address')) {
+            return filled($this->address) ? trim((string) $this->address) : null;
         }
 
-        return static::buildAddressUkFromStore($this->store);
+        return static::buildAddressFromStore($this->store);
     }
 
-    public function getResolvedWorkScheduleUkAttribute(): ?string
+    public function getResolvedWorkScheduleAttribute(): ?string
     {
-        if (! $this->shouldInherit('work_schedule_uk')) {
-            return filled($this->work_schedule_uk) ? trim((string) $this->work_schedule_uk) : null;
+        if (! $this->shouldInherit('work_schedule')) {
+            return filled($this->work_schedule) ? trim((string) $this->work_schedule) : null;
         }
 
-        return static::buildWorkScheduleUkFromStore($this->store);
+        return static::buildWorkScheduleFromStore($this->store);
     }
 
     public function shouldInherit(string $field): bool
@@ -94,7 +88,7 @@ class DeliveryPickupPoint extends Model
         return (bool) data_get($this->settings ?? [], "inherit.$field", true);
     }
 
-    public static function buildAddressUkFromStore(?Store $store): ?string
+    public static function buildAddressFromStore(?Store $store): ?string
     {
         if (! $store) {
             return null;
@@ -135,7 +129,7 @@ class DeliveryPickupPoint extends Model
         return filled($number) ? trim((string) $number) : null;
     }
 
-    public static function buildWorkScheduleUkFromStore(?Store $store): ?string
+    public static function buildWorkScheduleFromStore(?Store $store): ?string
     {
         if (! $store) {
             return null;
@@ -203,10 +197,13 @@ class DeliveryPickupPoint extends Model
         }
 
         $exceptionLines = [];
-        $exceptions = is_array($store->working_exceptions) ? $store->working_exceptions : [];
+        $exceptions = method_exists($store, 'resolvedWorkingExceptionsForYear')
+            ? $store->resolvedWorkingExceptionsForYear(now($store->resolvedTimezone())->year)
+            : (is_array($store->working_exceptions) ? $store->working_exceptions : []);
 
         foreach ($exceptions as $exception) {
-            $dateRaw = $exception['date'] ?? null;
+            $dateRaw = $exception['effective_date'] ?? ($exception['date'] ?? null);
+
             if (! filled($dateRaw)) {
                 continue;
             }
@@ -220,6 +217,7 @@ class DeliveryPickupPoint extends Model
             $title = filled($exception['title'] ?? null) ? trim((string) $exception['title']) : null;
             $note = filled($exception['note'] ?? null) ? trim((string) $exception['note']) : null;
             $isClosed = (bool) ($exception['is_closed'] ?? false);
+            $repeatAnnually = (bool) ($exception['repeat_annually'] ?? false);
 
             if ($isClosed) {
                 $line = "{$date} — вихідний";
@@ -241,6 +239,10 @@ class DeliveryPickupPoint extends Model
 
             if ($title) {
                 $line .= " ({$title})";
+            }
+
+            if ($repeatAnnually) {
+                $line .= ' [щороку]';
             }
 
             if ($note) {
@@ -266,35 +268,25 @@ class DeliveryPickupPoint extends Model
     protected static function booted(): void
     {
         static::saving(function (self $row) {
-            $row->name_uk = trim((string) $row->name_uk);
-
-            $row->name_en = filled($row->name_en) ? trim((string) $row->name_en) : null;
-            $row->name_ru = filled($row->name_ru) ? trim((string) $row->name_ru) : null;
-
-            $row->address_uk = filled($row->address_uk) ? trim((string) $row->address_uk) : null;
-            $row->address_en = filled($row->address_en) ? trim((string) $row->address_en) : null;
-            $row->address_ru = filled($row->address_ru) ? trim((string) $row->address_ru) : null;
-
+            $row->name = trim((string) $row->name);
+            $row->address = filled($row->address) ? trim((string) $row->address) : null;
             $row->phone = filled($row->phone) ? trim((string) $row->phone) : null;
-
-            $row->work_schedule_uk = filled($row->work_schedule_uk) ? trim((string) $row->work_schedule_uk) : null;
-            $row->work_schedule_en = filled($row->work_schedule_en) ? trim((string) $row->work_schedule_en) : null;
-            $row->work_schedule_ru = filled($row->work_schedule_ru) ? trim((string) $row->work_schedule_ru) : null;
+            $row->work_schedule = filled($row->work_schedule) ? trim((string) $row->work_schedule) : null;
 
             $row->sort_order = filled($row->sort_order) ? (int) $row->sort_order : 100;
 
             $settings = is_array($row->settings) ? $row->settings : [];
             $settings['inherit'] = array_merge([
                 'phone' => true,
-                'address_uk' => true,
-                'work_schedule_uk' => true,
+                'address' => true,
+                'work_schedule' => true,
             ], is_array($settings['inherit'] ?? null) ? $settings['inherit'] : []);
 
             $row->settings = $settings;
 
             if (! filled($row->code)) {
                 $storeId = (int) $row->store_id;
-                $base = Str::slug($row->name_uk ?: 'pickup-point');
+                $base = Str::slug($row->name ?: 'pickup-point');
                 $row->code = "pickup-{$storeId}-{$base}";
             } else {
                 $row->code = Str::slug((string) $row->code);

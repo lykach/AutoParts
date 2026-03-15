@@ -26,6 +26,7 @@ class DeliveryPickupPointResource extends Resource
     protected static ?string $navigationLabel = 'Точки самовивозу';
     protected static ?string $modelLabel = 'точка самовивозу';
     protected static ?string $pluralModelLabel = 'точки самовивозу';
+    protected static ?string $recordTitleAttribute = 'name';
 
     public static function getMaxContentWidth(): ?string
     {

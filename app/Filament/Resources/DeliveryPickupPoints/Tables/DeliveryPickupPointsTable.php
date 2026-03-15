@@ -20,7 +20,7 @@ class DeliveryPickupPointsTable
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('name_uk')
+                Tables\Columns\TextColumn::make('name')
                     ->label('Точка самовивозу')
                     ->searchable()
                     ->sortable()
@@ -46,7 +46,7 @@ class DeliveryPickupPointsTable
                     ->wrap()
                     ->toggleable(),
 
-                Tables\Columns\TextColumn::make('resolved_address_uk')
+                Tables\Columns\TextColumn::make('resolved_address')
                     ->label('Адреса')
                     ->placeholder('—')
                     ->wrap()

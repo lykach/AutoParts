@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Store\Schemas;
 
 use App\Filament\Forms\Components\PhoneInput;
 use App\Models\Store;
+use Carbon\Carbon;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\KeyValue;
@@ -674,7 +675,7 @@ class StoreForm
                                 ]),
 
                             Section::make('Святкові дні та винятки')
-                                ->description('Разові виключення з регулярного графіка: свята, скорочені дні, переноси, спеціальні години роботи.')
+                                ->description('Разові виключення з регулярного графіка: свята, скорочені дні, переноси, спеціальні години роботи. Для постійних свят можна увімкнути "Повторювати щороку" — тоді система братиме той самий день і місяць щороку автоматично.')
                                 ->schema([
                                     Repeater::make('working_exceptions')
                                         ->label('Винятки')
@@ -685,6 +686,7 @@ class StoreForm
                                             $title = trim((string) ($state['title'] ?? ''));
                                             $date = $state['date'] ?? null;
                                             $type = $state['type'] ?? null;
+                                            $repeat = (bool) ($state['repeat_annually'] ?? false);
 
                                             $typeLabel = match ($type) {
                                                 'holiday' => 'Свято',
@@ -693,22 +695,35 @@ class StoreForm
                                                 default => 'Виняток',
                                             };
 
-                                            if ($title !== '' && $date) {
-                                                return "{$typeLabel}: {$title} ({$date})";
+                                            $dateLabel = null;
+
+                                            if ($date) {
+                                                try {
+                                                    $carbon = Carbon::parse($date);
+                                                    $dateLabel = $repeat
+                                                        ? 'щороку ' . $carbon->format('d.m')
+                                                        : $carbon->format('d.m.Y');
+                                                } catch (\Throwable $e) {
+                                                    $dateLabel = $date;
+                                                }
+                                            }
+
+                                            if ($title !== '' && $dateLabel) {
+                                                return "{$typeLabel}: {$title} ({$dateLabel})";
                                             }
 
                                             if ($title !== '') {
                                                 return "{$typeLabel}: {$title}";
                                             }
 
-                                            if ($date) {
-                                                return "{$typeLabel}: {$date}";
+                                            if ($dateLabel) {
+                                                return "{$typeLabel}: {$dateLabel}";
                                             }
 
-                                            return $typeLabel;
+                                            return $repeat ? "{$typeLabel}: щорічний" : $typeLabel;
                                         })
                                         ->schema([
-                                            Grid::make(['default' => 1, 'md' => 3])->schema([
+                                            Grid::make(['default' => 1, 'md' => 4])->schema([
                                                 Select::make('type')
                                                     ->label('Тип')
                                                     ->options([
@@ -723,7 +738,17 @@ class StoreForm
                                                     ->label('Дата')
                                                     ->native(false)
                                                     ->displayFormat('d.m.Y')
-                                                    ->required(),
+                                                    ->required()
+                                                    ->helperText(fn ($get) => (bool) $get('repeat_annually')
+                                                        ? 'Рік зберігається як базовий, але в роботі буде використовуватись лише день і місяць.'
+                                                        : 'Разова дата для цього винятку.'
+                                                    ),
+
+                                                Toggle::make('repeat_annually')
+                                                    ->label('Повторювати щороку')
+                                                    ->default(false)
+                                                    ->live()
+                                                    ->helperText('Наприклад: 01.01, 08.03, 25.12'),
 
                                                 Toggle::make('is_closed')
                                                     ->label('Не працює цього дня')
