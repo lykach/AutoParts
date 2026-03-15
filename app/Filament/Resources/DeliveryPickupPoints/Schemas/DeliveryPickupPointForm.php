@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DeliveryPickupPoints\Schemas;
 
+use App\Filament\Forms\Components\PhoneInput;
 use App\Models\DeliveryPickupPoint;
 use App\Models\Store;
 use Filament\Forms\Components\KeyValue;
@@ -87,9 +88,8 @@ class DeliveryPickupPointForm
                                 ->live()
                                 ->helperText('Рекомендовано. Тоді номер автоматично оновлюється після змін у магазині.'),
 
-                            TextInput::make('phone')
+                            PhoneInput::make('phone')
                                 ->label('Власний телефон точки')
-                                ->maxLength(50)
                                 ->disabled(fn ($get) => (bool) $get('settings.inherit.phone'))
                                 ->helperText(function ($get) {
                                     if (! (bool) $get('settings.inherit.phone')) {

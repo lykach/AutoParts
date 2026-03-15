@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\DeliveryPickupPoints\Tables;
 
 use App\Models\Store;
+use App\Rules\UkrainianPhone;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -42,7 +43,19 @@ class DeliveryPickupPointsTable
 
                 Tables\Columns\TextColumn::make('resolved_phone')
                     ->label('Телефон')
+                    ->state(function ($record): ?string {
+                        $raw = $record->resolved_phone;
+
+                        if (! filled($raw)) {
+                            return null;
+                        }
+
+                        return UkrainianPhone::format((string) $raw);
+                    })
                     ->placeholder('—')
+                    ->copyable()
+                    ->copyMessage('Телефон скопійовано')
+                    ->icon('heroicon-o-phone')
                     ->wrap()
                     ->toggleable(),
 
