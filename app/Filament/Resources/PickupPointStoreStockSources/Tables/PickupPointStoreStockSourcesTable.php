@@ -24,15 +24,8 @@ class PickupPointStoreStockSourcesTable
                 Tables\Columns\TextColumn::make('pickup_point_view')
                     ->label('Точка самовивозу')
                     ->state(function ($record): string {
-                        $pickupName = $record->pickupPoint?->name_uk
+                        return $record->pickupPoint?->name
                             ?: ('#' . (int) $record->pickup_point_id);
-
-                        $storeName = $record->pickupPoint?->store?->name_uk
-                            ?: ('#' . (int) ($record->pickupPoint?->store_id ?? 0));
-
-                        $storeType = $record->pickupPoint?->store?->is_main ? 'Головний' : 'Філія';
-
-                        return $pickupName;
                     })
                     ->description(function ($record): string {
                         $storeName = $record->pickupPoint?->store?->name_uk
@@ -45,7 +38,7 @@ class PickupPointStoreStockSourcesTable
                     ->wrap()
                     ->searchable(query: function ($query, string $search) {
                         return $query->whereHas('pickupPoint', function ($q) use ($search) {
-                            $q->where('name_uk', 'like', "%{$search}%")
+                            $q->where('name', 'like', "%{$search}%")
                                 ->orWhere('code', 'like', "%{$search}%")
                                 ->orWhereHas('store', function ($sq) use ($search) {
                                     $sq->where('name_uk', 'like', "%{$search}%");
@@ -68,7 +61,7 @@ class PickupPointStoreStockSourcesTable
                         $locationName = $record->storeStockSource?->location?->name
                             ?: ('#' . (int) ($record->storeStockSource?->stock_source_location_id ?? 0));
 
-                        $city = $record->storeStockSource?->location?->city
+                        $city = filled($record->storeStockSource?->location?->city)
                             ? trim((string) $record->storeStockSource->location->city)
                             : null;
 
@@ -93,7 +86,7 @@ class PickupPointStoreStockSourcesTable
                             'minute' => 'хв',
                             'hour' => 'год',
                             'day' => 'дн',
-                            default => $record->transfer_time_unit,
+                            default => (string) $record->transfer_time_unit,
                         };
 
                         $min = (int) $record->transfer_time_min;
@@ -133,13 +126,15 @@ class PickupPointStoreStockSourcesTable
                     ->preload()
                     ->options(fn () => DeliveryPickupPoint::query()
                         ->orderBy('sort_order')
-                        ->orderBy('name_uk')
-                        ->pluck('name_uk', 'id')
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
                         ->all()
                     ),
 
                 SelectFilter::make('pickup_store_id')
                     ->label('Магазин точки')
+                    ->searchable()
+                    ->preload()
                     ->options(fn () => Store::query()
                         ->orderByDesc('is_main')
                         ->orderBy('sort_order')
@@ -158,6 +153,8 @@ class PickupPointStoreStockSourcesTable
 
                 SelectFilter::make('source_store_id')
                     ->label('Магазин складу')
+                    ->searchable()
+                    ->preload()
                     ->options(fn () => Store::query()
                         ->orderByDesc('is_main')
                         ->orderBy('sort_order')

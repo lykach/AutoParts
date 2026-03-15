@@ -25,7 +25,6 @@ class PickupPointStoreStockSourceForm
             ->orderBy('priority')
             ->orderBy('id');
 
-        // Якщо вибрана точка самовивозу — показуємо тільки склади її магазину
         if ($pickupPointId) {
             $storeId = DeliveryPickupPoint::query()
                 ->whereKey($pickupPointId)
@@ -49,7 +48,7 @@ class PickupPointStoreStockSourceForm
 
             $locationId = (int) $row->stock_source_location_id;
             $locationName = $row->location?->name ?: ('Локація #' . $locationId);
-            $city = $row->location?->city ? trim((string) $row->location->city) : null;
+            $city = filled($row->location?->city) ? trim((string) $row->location->city) : null;
 
             $leafLabel = $locationName;
             if ($city) {
@@ -101,7 +100,7 @@ class PickupPointStoreStockSourceForm
                         ->columnSpan(['default' => 1, 'lg' => 1])
                         ->schema([
                             Select::make('pickup_point_id')
-                                ->label('Точка самовивозу *')
+                                ->label('Точка самовивозу')
                                 ->required()
                                 ->searchable()
                                 ->preload()
@@ -109,13 +108,16 @@ class PickupPointStoreStockSourceForm
                                 ->options(fn () => DeliveryPickupPoint::query()
                                     ->with('store')
                                     ->orderBy('sort_order')
-                                    ->orderBy('name_uk')
+                                    ->orderBy('name')
                                     ->get()
                                     ->mapWithKeys(fn ($row) => [
-                                        $row->id => $row->name_uk . ' [' . ($row->store?->name_uk ?? ('#' . $row->store_id)) . ']',
+                                        $row->id => $row->name . ' [' . ($row->store?->name_uk ?? ('#' . $row->store_id)) . ']',
                                     ])
                                     ->all()
                                 )
+                                ->validationMessages([
+                                    'required' => 'Оберіть точку самовивозу.',
+                                ])
                                 ->afterStateUpdated(function ($state, $set, $get) {
                                     $currentSourceId = $get('store_stock_source_id');
 
@@ -143,22 +145,24 @@ class PickupPointStoreStockSourceForm
                                 }),
 
                             SelectTree::make('store_stock_source_id')
-                                ->label('Склад магазину *')
+                                ->label('Склад магазину')
                                 ->required()
                                 ->multiple(false)
                                 ->searchable()
                                 ->showTags(false)
+                                ->placeholder('Виберіть склад магазину')
                                 ->getTreeUsing(fn ($get) => static::buildStoreStockSourceTree(
                                     filled($get('pickup_point_id')) ? (int) $get('pickup_point_id') : null
                                 ))
                                 ->helperText('Після вибору точки самовивозу показуються склади тільки її магазину.')
+                                ->validationMessages([
+                                    'required' => 'Оберіть склад магазину.',
+                                ])
                                 ->afterStateHydrated(function ($state, $set) {
-                                    $state = filled($state) ? (string) $state : null;
-                                    $set('store_stock_source_id', $state);
+                                    $set('store_stock_source_id', filled($state) ? (string) $state : null);
                                 })
                                 ->afterStateUpdated(function ($state, $set) {
-                                    $state = filled($state) ? (string) $state : null;
-                                    $set('store_stock_source_id', $state);
+                                    $set('store_stock_source_id', filled($state) ? (string) $state : null);
                                 })
                                 ->dehydrateStateUsing(
                                     fn ($state) => (filled($state) && is_numeric($state)) ? (int) $state : null
@@ -169,7 +173,12 @@ class PickupPointStoreStockSourceForm
                                             $pickupPointId = $get('pickup_point_id');
                                             $storeStockSourceId = $value;
 
-                                            if (! filled($pickupPointId) || ! filled($storeStockSourceId) || ! is_numeric($storeStockSourceId)) {
+                                            if (! filled($pickupPointId) || ! filled($storeStockSourceId)) {
+                                                return;
+                                            }
+
+                                            if (! is_numeric($storeStockSourceId)) {
+                                                $fail('Оберіть склад магазину зі списку.');
                                                 return;
                                             }
 
@@ -219,33 +228,47 @@ class PickupPointStoreStockSourceForm
                                 ->label('Пріоритет')
                                 ->numeric()
                                 ->default(100)
-                                ->helperText('Менше значення = вище пріоритет.'),
+                                ->helperText('Менше значення = вище пріоритет.')
+                                ->validationMessages([
+                                    'numeric' => 'Пріоритет має бути числом.',
+                                ]),
                         ]),
 
                     Section::make('Час довозу')
                         ->columnSpan(['default' => 1, 'lg' => 1])
                         ->schema([
                             Select::make('transfer_time_unit')
-                                ->label('Одиниця часу *')
+                                ->label('Одиниця часу')
                                 ->required()
                                 ->options([
                                     'minute' => 'Хвилини',
                                     'hour' => 'Години',
                                     'day' => 'Дні',
                                 ])
-                                ->default('hour'),
+                                ->default('hour')
+                                ->validationMessages([
+                                    'required' => 'Оберіть одиницю часу.',
+                                ]),
 
                             TextInput::make('transfer_time_min')
-                                ->label('Мінімум *')
+                                ->label('Мінімум')
                                 ->required()
                                 ->numeric()
-                                ->default(0),
+                                ->default(0)
+                                ->validationMessages([
+                                    'required' => 'Вкажіть мінімальний час довозу.',
+                                    'numeric' => 'Мінімальний час довозу має бути числом.',
+                                ]),
 
                             TextInput::make('transfer_time_max')
-                                ->label('Максимум *')
+                                ->label('Максимум')
                                 ->required()
                                 ->numeric()
-                                ->default(0),
+                                ->default(0)
+                                ->validationMessages([
+                                    'required' => 'Вкажіть максимальний час довозу.',
+                                    'numeric' => 'Максимальний час довозу має бути числом.',
+                                ]),
 
                             TimePicker::make('cutoff_at')
                                 ->label('Cutoff time')

@@ -75,13 +75,17 @@ class PickupSourcesRelationManager extends RelationManager
 
         return $schema->components([
             SelectTree::make('store_stock_source_id')
-                ->label('Склад магазину *')
+                ->label('Склад магазину')
                 ->required()
                 ->multiple(false)
                 ->searchable()
                 ->showTags(false)
+                ->placeholder('Виберіть склад магазину')
                 ->getTreeUsing(fn () => static::buildStoreStockSourceTree($ownerStoreId))
                 ->helperText('Показуються тільки склади того магазину, до якого належить ця точка самовивозу.')
+                ->validationMessages([
+                    'required' => 'Оберіть склад магазину.',
+                ])
                 ->afterStateHydrated(function ($state, $set) {
                     $set('store_stock_source_id', filled($state) ? (string) $state : null);
                 })
@@ -94,7 +98,12 @@ class PickupSourcesRelationManager extends RelationManager
                 ->rules([
                     function ($record) {
                         return function (string $attribute, $value, \Closure $fail) use ($record) {
-                            if (! filled($value) || ! is_numeric($value)) {
+                            if (! filled($value)) {
+                                return;
+                            }
+
+                            if (! is_numeric($value)) {
+                                $fail('Оберіть склад магазину зі списку.');
                                 return;
                             }
 
@@ -138,26 +147,37 @@ class PickupSourcesRelationManager extends RelationManager
                 ->helperText('Менше значення = вищий пріоритет.'),
 
             Select::make('transfer_time_unit')
-                ->label('Одиниця часу *')
+                ->label('Одиниця часу')
                 ->required()
                 ->options([
                     'minute' => 'Хвилини',
                     'hour' => 'Години',
                     'day' => 'Дні',
                 ])
-                ->default('hour'),
+                ->default('hour')
+                ->validationMessages([
+                    'required' => 'Оберіть одиницю часу.',
+                ]),
 
             TextInput::make('transfer_time_min')
-                ->label('Мінімум *')
+                ->label('Мінімум')
                 ->required()
                 ->numeric()
-                ->default(0),
+                ->default(0)
+                ->validationMessages([
+                    'required' => 'Вкажіть мінімальний час довозу.',
+                    'numeric' => 'Мінімальний час довозу має бути числом.',
+                ]),
 
             TextInput::make('transfer_time_max')
-                ->label('Максимум *')
+                ->label('Максимум')
                 ->required()
                 ->numeric()
-                ->default(0),
+                ->default(0)
+                ->validationMessages([
+                    'required' => 'Вкажіть максимальний час довозу.',
+                    'numeric' => 'Максимальний час довозу має бути числом.',
+                ]),
 
             TimePicker::make('cutoff_at')
                 ->label('Cutoff time')
@@ -265,6 +285,7 @@ class PickupSourcesRelationManager extends RelationManager
 
                         return PickupPointStoreStockSource::query()->create($data);
                     }),
+
             ])
             ->actions([
                 EditAction::make()

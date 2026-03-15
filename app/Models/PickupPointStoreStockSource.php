@@ -67,6 +67,7 @@ class PickupPointStoreStockSource extends Model
 
             $row->settings = is_array($row->settings) ? $row->settings : [];
             $row->note = filled($row->note) ? trim((string) $row->note) : null;
+            $row->cutoff_at = filled($row->cutoff_at) ? trim((string) $row->cutoff_at) : null;
         });
     }
 }
