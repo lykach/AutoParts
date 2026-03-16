@@ -20,11 +20,16 @@ class CityCourierSlotExceptionResource extends Resource
     protected static ?string $model = CityCourierSlotException::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-calendar-days';
-    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
+    protected static string|UnitEnum|null $navigationGroup = 'Логістика';
 
     protected static ?string $navigationLabel = 'Курʼєр: винятки';
     protected static ?string $modelLabel = 'виняток слота доставки';
     protected static ?string $pluralModelLabel = 'винятки слотів доставки';
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
 
     public static function getMaxContentWidth(): ?string
     {

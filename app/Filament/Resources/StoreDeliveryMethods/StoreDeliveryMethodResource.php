@@ -20,7 +20,7 @@ class StoreDeliveryMethodResource extends Resource
     protected static ?string $model = StoreDeliveryMethod::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-building-storefront';
-    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
+    protected static string|UnitEnum|null $navigationGroup = 'Логістика';
 
     protected static ?string $navigationLabel = 'Доставки магазинів';
     protected static ?string $modelLabel = 'доставка магазину';

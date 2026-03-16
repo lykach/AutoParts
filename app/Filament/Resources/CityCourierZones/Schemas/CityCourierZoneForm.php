@@ -4,12 +4,10 @@ namespace App\Filament\Resources\CityCourierZones\Schemas;
 
 use App\Models\CityCourierZone;
 use App\Models\Store;
-use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -156,39 +154,13 @@ class CityCourierZoneForm
                                 ->default(false),
                         ]),
 
-                    Section::make('Same day і графік')
+                    Section::make('Службова інформація')
                         ->columnSpan(['default' => 1, 'lg' => 1])
                         ->schema([
-                            Toggle::make('same_day_available')
-                                ->label('Доставка в той самий день')
-                                ->default(true),
-
-                            TimePicker::make('order_cutoff_at')
-                                ->label('Cutoff time')
-                                ->seconds(false)
-                                ->helperText('Після цього часу same-day вже не діє.'),
-
-                            TimePicker::make('work_time_from')
-                                ->label('Початок роботи курʼєра')
-                                ->seconds(false),
-
-                            TimePicker::make('work_time_to')
-                                ->label('Кінець роботи курʼєра')
-                                ->seconds(false),
-
-                            CheckboxList::make('work_days')
-                                ->label('Робочі дні')
-                                ->columns(4)
-                                ->options([
-                                    'mon' => 'Пн',
-                                    'tue' => 'Вт',
-                                    'wed' => 'Ср',
-                                    'thu' => 'Чт',
-                                    'fri' => 'Пт',
-                                    'sat' => 'Сб',
-                                    'sun' => 'Нд',
-                                ])
-                                ->default(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']),
+                            Textarea::make('manager_note')
+                                ->label('Примітка для менеджера')
+                                ->rows(6)
+                                ->maxLength(5000),
                         ]),
                 ]),
 
@@ -209,23 +181,15 @@ class CityCourierZoneForm
                                 ->rows(3),
                         ]),
 
-                    Section::make('Внутрішня примітка')
+                    Section::make('Додатково')
                         ->columnSpan(['default' => 1, 'lg' => 1])
                         ->schema([
-                            Textarea::make('manager_note')
-                                ->label('Примітка для менеджера')
-                                ->rows(6)
-                                ->maxLength(5000),
+                            KeyValue::make('settings')
+                                ->label('settings')
+                                ->default([])
+                                ->helperText('Тільки для рідкісних службових прапорців. Основну логіку тримаємо в окремих полях.'),
                         ]),
                 ]),
-
-                Section::make('Додатково')
-                    ->schema([
-                        KeyValue::make('settings')
-                            ->label('settings')
-                            ->default([])
-                            ->helperText('Тільки для рідкісних службових прапорців. Основну логіку тримаємо в окремих полях.'),
-                    ]),
             ]);
     }
 }

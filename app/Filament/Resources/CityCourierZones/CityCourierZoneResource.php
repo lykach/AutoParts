@@ -5,6 +5,8 @@ namespace App\Filament\Resources\CityCourierZones;
 use App\Filament\Resources\CityCourierZones\Pages\CreateCityCourierZone;
 use App\Filament\Resources\CityCourierZones\Pages\EditCityCourierZone;
 use App\Filament\Resources\CityCourierZones\Pages\ListCityCourierZones;
+use App\Filament\Resources\CityCourierZones\RelationManagers\ExceptionsRelationManager;
+use App\Filament\Resources\CityCourierZones\RelationManagers\SlotsRelationManager;
 use App\Filament\Resources\CityCourierZones\Schemas\CityCourierZoneForm;
 use App\Filament\Resources\CityCourierZones\Tables\CityCourierZonesTable;
 use App\Models\CityCourierZone;
@@ -20,7 +22,7 @@ class CityCourierZoneResource extends Resource
     protected static ?string $model = CityCourierZone::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map';
-    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
+    protected static string|UnitEnum|null $navigationGroup = 'Логістика';
 
     protected static ?string $navigationLabel = 'Курʼєр по місту';
     protected static ?string $modelLabel = 'зона курʼєрської доставки';
@@ -35,7 +37,7 @@ class CityCourierZoneResource extends Resource
     {
         return parent::getEloquentQuery()
             ->with(['store'])
-            ->withCount('slots');
+            ->withCount(['slots', 'exceptions']);
     }
 
     public static function form(Schema $schema): Schema
@@ -46,6 +48,14 @@ class CityCourierZoneResource extends Resource
     public static function table(Table $table): Table
     {
         return CityCourierZonesTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            SlotsRelationManager::class,
+            ExceptionsRelationManager::class,
+        ];
     }
 
     public static function getNavigationBadge(): ?string
