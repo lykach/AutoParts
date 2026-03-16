@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -68,6 +69,18 @@ class CityCourierZone extends Model
     public function slots(): HasMany
     {
         return $this->hasMany(CityCourierZoneSlot::class, 'city_courier_zone_id');
+    }
+
+    public function exceptions(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            CityCourierSlotException::class,
+            CityCourierZoneSlot::class,
+            'city_courier_zone_id',
+            'city_courier_zone_slot_id',
+            'id',
+            'id',
+        );
     }
 
     public function scopeActive(Builder $q): Builder

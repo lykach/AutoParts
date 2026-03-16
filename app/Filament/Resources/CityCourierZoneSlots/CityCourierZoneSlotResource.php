@@ -20,11 +20,16 @@ class CityCourierZoneSlotResource extends Resource
     protected static ?string $model = CityCourierZoneSlot::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clock';
-    protected static string|UnitEnum|null $navigationGroup = 'Доставки';
+    protected static string|UnitEnum|null $navigationGroup = 'Логістика';
 
     protected static ?string $navigationLabel = 'Курʼєр: слоти';
     protected static ?string $modelLabel = 'слот курʼєрської доставки';
     protected static ?string $pluralModelLabel = 'слоти курʼєрської доставки';
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
 
     public static function getMaxContentWidth(): ?string
     {
