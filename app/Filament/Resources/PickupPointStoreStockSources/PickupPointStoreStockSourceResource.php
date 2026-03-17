@@ -27,6 +27,11 @@ class PickupPointStoreStockSourceResource extends Resource
     protected static ?string $pluralModelLabel = 'джерела самовивозу';
     protected static ?string $recordTitleAttribute = 'id';
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     public static function getMaxContentWidth(): ?string
     {
         return 'full';
