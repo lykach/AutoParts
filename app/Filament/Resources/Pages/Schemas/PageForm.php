@@ -7,6 +7,7 @@ use App\Enums\PageTemplate;
 use App\Models\Page;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -46,17 +47,19 @@ class PageForm
                                     );
                                 }
                             })
-                            ->columnSpan(6),
+                            ->columnSpan(5),
 
                         TextInput::make('slug')
                             ->label('Slug')
                             ->maxLength(255)
-                            ->helperText('Можна не заповнювати — згенерується автоматично.')
+                            ->disabled(fn ($record) => (bool) $record?->is_system)
+                            ->dehydrated(fn ($record) => ! $record?->is_system)
+                            ->helperText('Можна не заповнювати — згенерується автоматично. Для системних сторінок slug заблокований.')
                             ->dehydrateStateUsing(function ($state, callable $get, $record) {
                                 $state = trim((string) $state);
 
                                 if (filled($state)) {
-                                    return Str::slug($state);
+                                    return Page::generateUniqueSlug(Str::slug($state), $record?->getKey(), true);
                                 }
 
                                 return Page::generateUniqueSlug(
@@ -65,7 +68,7 @@ class PageForm
                                 );
                             })
                             ->unique(ignoreRecord: true)
-                            ->columnSpan(6),
+                            ->columnSpan(4),
 
                         Select::make('template')
                             ->label('Шаблон')
@@ -73,7 +76,7 @@ class PageForm
                             ->default(PageTemplate::Default->value)
                             ->required()
                             ->native(false)
-                            ->columnSpan(6),
+                            ->columnSpan(5),
 
                         Select::make('status')
                             ->label('Статус')
@@ -81,24 +84,26 @@ class PageForm
                             ->default(PageStatus::Draft->value)
                             ->required()
                             ->native(false)
-                            ->columnSpan(4),
+                            ->columnSpan(5),
 
                         TextInput::make('sort')
                             ->label('Сортування')
                             ->numeric()
                             ->default(0)
                             ->required()
-                            ->columnSpan(2),
+                            ->columnSpan(1),
 
                         DateTimePicker::make('published_at')
                             ->label('Дата публікації')
                             ->seconds(false)
-                            ->columnSpan(4),
+                            ->columnSpan(5),
 
                         Toggle::make('is_system')
                             ->label('Системна сторінка')
                             ->default(false)
                             ->inline(false)
+                            ->disabled(fn ($record) => (bool) $record?->is_system)
+                            ->dehydrated(fn ($record) => ! $record?->is_system)
                             ->columnSpan(3),
 
                         Toggle::make('show_in_sitemap')
@@ -106,6 +111,11 @@ class PageForm
                             ->default(true)
                             ->inline(false)
                             ->columnSpan(3),
+
+                        Placeholder::make('page_url_info')
+                            ->label('URL')
+                            ->content(fn ($record, callable $get) => '/' . ltrim((string) ($record?->slug ?? $get('slug') ?? ''), '/'))
+                            ->columnSpan(5),
                     ]),
                 ]),
 

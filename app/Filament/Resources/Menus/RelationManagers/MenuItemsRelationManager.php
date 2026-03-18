@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Menus\RelationManagers;
 
 use App\Enums\MenuItemType;
 use App\Models\MenuItem;
+use App\Models\Page;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -19,6 +20,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Validation\Rules\Unique;
 
 class MenuItemsRelationManager extends RelationManager
 {
@@ -35,14 +37,23 @@ class MenuItemsRelationManager extends RelationManager
             ->orderBy('id')
             ->get()
             ->mapWithKeys(function (MenuItem $item) {
-                $label = $item->title_uk
-                    ?: $item->title_en
-                    ?: $item->title_ru
-                    ?: ('[#' . $item->id . '] Без назви');
-
-                return [$item->id => $label];
+                return [$item->id => $item->resolved_title];
             })
             ->all();
+    }
+
+    protected function normalizeUrl(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
+    }
+
+    protected function hasAtLeastOneTitle(callable $get): bool
+    {
+        return filled(trim((string) ($get('title_uk') ?? '')))
+            || filled(trim((string) ($get('title_en') ?? '')))
+            || filled(trim((string) ($get('title_ru') ?? '')));
     }
 
     public function form(Schema $schema): Schema
@@ -58,7 +69,25 @@ class MenuItemsRelationManager extends RelationManager
                             ->preload()
                             ->native(false)
                             ->placeholder('— Кореневий пункт —')
-                            ->columnSpan(4),
+                            ->columnSpan(4)
+                            ->rule(function ($record) {
+                                return function (string $attribute, $value, \Closure $fail) use ($record) {
+                                    if (blank($value)) {
+                                        return;
+                                    }
+
+                                    if ($record && (int) $value === (int) $record->getKey()) {
+                                        $fail('Не можна вибрати поточний пункт батьківським.');
+                                        return;
+                                    }
+
+                                    $parent = MenuItem::query()->find($value);
+
+                                    if (! $parent || (int) $parent->menu_id !== (int) $this->getOwnerRecord()->id) {
+                                        $fail('Батьківський пункт має належати до цього ж меню.');
+                                    }
+                                };
+                            }),
 
                         Select::make('type')
                             ->label('Тип')
@@ -67,6 +96,34 @@ class MenuItemsRelationManager extends RelationManager
                             ->required()
                             ->live()
                             ->native(false)
+                            ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                                if ($state === MenuItemType::Page->value) {
+                                    $set('url', null);
+                                    $set('category_id', null);
+                                    $set('manufacturer_id', null);
+                                    return;
+                                }
+
+                                if ($state === MenuItemType::Url->value) {
+                                    $set('page_id', null);
+                                    $set('category_id', null);
+                                    $set('manufacturer_id', null);
+                                    return;
+                                }
+
+                                if ($state === MenuItemType::Category->value) {
+                                    $set('page_id', null);
+                                    $set('url', null);
+                                    $set('manufacturer_id', null);
+                                    return;
+                                }
+
+                                if ($state === MenuItemType::Manufacturer->value) {
+                                    $set('page_id', null);
+                                    $set('url', null);
+                                    $set('category_id', null);
+                                }
+                            })
                             ->columnSpan(4),
 
                         TextInput::make('sort')
@@ -90,7 +147,7 @@ class MenuItemsRelationManager extends RelationManager
                         TextInput::make('title_uk')
                             ->label('Назва (UK)')
                             ->maxLength(255)
-                            ->helperText('Можна не заповнювати, якщо тип = "Сторінка": назва підтягнеться зі сторінки в таблиці.')
+                            ->helperText('Для типу "Сторінка" можна не заповнювати — назва підтягнеться автоматично.')
                             ->live(onBlur: true),
                     ]),
                     Tab::make('EN')->schema([
@@ -121,17 +178,15 @@ class MenuItemsRelationManager extends RelationManager
                         ->visible(fn (callable $get) => $get('type') === MenuItemType::Page->value)
                         ->required(fn (callable $get) => $get('type') === MenuItemType::Page->value)
                         ->afterStateUpdated(function ($state, callable $set, callable $get) {
-                            if ($get('type') !== MenuItemType::Page->value) {
+                            if ($get('type') !== MenuItemType::Page->value || blank($state)) {
                                 return;
                             }
 
-                            $currentTitleUk = trim((string) ($get('title_uk') ?? ''));
-
-                            if (filled($currentTitleUk) || blank($state)) {
+                            if ($this->hasAtLeastOneTitle($get)) {
                                 return;
                             }
 
-                            $page = \App\Models\Page::query()->find($state);
+                            $page = Page::query()->find($state);
 
                             if (! $page) {
                                 return;
@@ -150,7 +205,29 @@ class MenuItemsRelationManager extends RelationManager
                         ->label('URL')
                         ->placeholder('/delivery-payment або https://example.com')
                         ->visible(fn (callable $get) => $get('type') === MenuItemType::Url->value)
-                        ->required(fn (callable $get) => $get('type') === MenuItemType::Url->value),
+                        ->required(fn (callable $get) => $get('type') === MenuItemType::Url->value)
+                        ->dehydrateStateUsing(fn ($state) => $this->normalizeUrl($state))
+                        ->rule(function (callable $get) {
+                            return function (string $attribute, $value, \Closure $fail) use ($get) {
+                                if ($get('type') !== MenuItemType::Url->value) {
+                                    return;
+                                }
+
+                                $value = trim((string) $value);
+
+                                if ($value === '') {
+                                    $fail('Для типу "URL" потрібно вказати посилання.');
+                                    return;
+                                }
+
+                                $isAbsolute = filter_var($value, FILTER_VALIDATE_URL);
+                                $isRelative = str_starts_with($value, '/');
+
+                                if (! $isAbsolute && ! $isRelative) {
+                                    $fail('URL має починатися з "/" або бути повним посиланням.');
+                                }
+                            };
+                        }),
 
                     Select::make('category_id')
                         ->label('Категорія')
@@ -162,8 +239,32 @@ class MenuItemsRelationManager extends RelationManager
                         ->searchable()
                         ->preload()
                         ->native(false)
+                        ->live()
                         ->visible(fn (callable $get) => $get('type') === MenuItemType::Category->value)
-                        ->required(fn (callable $get) => $get('type') === MenuItemType::Category->value),
+                        ->required(fn (callable $get) => $get('type') === MenuItemType::Category->value)
+                        ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                            if ($get('type') !== MenuItemType::Category->value || blank($state)) {
+                                return;
+                            }
+
+                            if ($this->hasAtLeastOneTitle($get)) {
+                                return;
+                            }
+
+                            $category = \App\Models\Category::query()->find($state);
+
+                            if (! $category) {
+                                return;
+                            }
+
+                            $set(
+                                'title_uk',
+                                $category->name_uk
+                                    ?: $category->name_en
+                                    ?: $category->name_ru
+                                    ?: 'Категорія'
+                            );
+                        }),
 
                     Select::make('manufacturer_id')
                         ->label('Виробник')
@@ -175,8 +276,26 @@ class MenuItemsRelationManager extends RelationManager
                         ->searchable()
                         ->preload()
                         ->native(false)
+                        ->live()
                         ->visible(fn (callable $get) => $get('type') === MenuItemType::Manufacturer->value)
-                        ->required(fn (callable $get) => $get('type') === MenuItemType::Manufacturer->value),
+                        ->required(fn (callable $get) => $get('type') === MenuItemType::Manufacturer->value)
+                        ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                            if ($get('type') !== MenuItemType::Manufacturer->value || blank($state)) {
+                                return;
+                            }
+
+                            if ($this->hasAtLeastOneTitle($get)) {
+                                return;
+                            }
+
+                            $manufacturer = \App\Models\Manufacturer::query()->find($state);
+
+                            if (! $manufacturer) {
+                                return;
+                            }
+
+                            $set('title_uk', $manufacturer->name ?: 'Виробник');
+                        }),
                 ]),
 
             Section::make('Додатково')
@@ -185,6 +304,7 @@ class MenuItemsRelationManager extends RelationManager
                         TextInput::make('icon')
                             ->label('Іконка')
                             ->placeholder('heroicon-o-truck')
+                            ->maxLength(255)
                             ->columnSpan(4),
 
                         TextInput::make('badge_text')
@@ -207,37 +327,117 @@ class MenuItemsRelationManager extends RelationManager
         ]);
     }
 
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        return $this->prepareData($data);
+    }
+
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        return $this->prepareData($data);
+    }
+
+    protected function prepareData(array $data): array
+    {
+        $data['menu_id'] = $this->getOwnerRecord()->id;
+
+        $data['title_uk'] = $this->nullableTrim($data['title_uk'] ?? null);
+        $data['title_en'] = $this->nullableTrim($data['title_en'] ?? null);
+        $data['title_ru'] = $this->nullableTrim($data['title_ru'] ?? null);
+        $data['icon'] = $this->nullableTrim($data['icon'] ?? null);
+        $data['badge_text'] = $this->nullableTrim($data['badge_text'] ?? null);
+        $data['badge_color'] = $this->nullableTrim($data['badge_color'] ?? null);
+        $data['url'] = $this->normalizeUrl($data['url'] ?? null);
+        $data['parent_id'] = blank($data['parent_id'] ?? null) ? null : (int) $data['parent_id'];
+
+        $type = $data['type'] ?? MenuItemType::Page->value;
+
+        if ($type === MenuItemType::Page->value) {
+            $data['url'] = null;
+            $data['category_id'] = null;
+            $data['manufacturer_id'] = null;
+
+            if (! $this->hasAnyTitleInData($data) && ! empty($data['page_id'])) {
+                $page = Page::query()->find($data['page_id']);
+
+                if ($page) {
+                    $data['title_uk'] = $page->title_uk
+                        ?: $page->title_en
+                        ?: $page->title_ru
+                        ?: $page->name;
+                }
+            }
+        }
+
+        if ($type === MenuItemType::Url->value) {
+            $data['page_id'] = null;
+            $data['category_id'] = null;
+            $data['manufacturer_id'] = null;
+        }
+
+        if ($type === MenuItemType::Category->value) {
+            $data['page_id'] = null;
+            $data['url'] = null;
+            $data['manufacturer_id'] = null;
+
+            if (! $this->hasAnyTitleInData($data) && ! empty($data['category_id'])) {
+                $category = \App\Models\Category::query()->find($data['category_id']);
+
+                if ($category) {
+                    $data['title_uk'] = $category->name_uk
+                        ?: $category->name_en
+                        ?: $category->name_ru
+                        ?: 'Категорія';
+                }
+            }
+        }
+
+        if ($type === MenuItemType::Manufacturer->value) {
+            $data['page_id'] = null;
+            $data['url'] = null;
+            $data['category_id'] = null;
+
+            if (! $this->hasAnyTitleInData($data) && ! empty($data['manufacturer_id'])) {
+                $manufacturer = \App\Models\Manufacturer::query()->find($data['manufacturer_id']);
+
+                if ($manufacturer) {
+                    $data['title_uk'] = $manufacturer->name ?: 'Виробник';
+                }
+            }
+        }
+
+        return $data;
+    }
+
+    protected function nullableTrim(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : null;
+    }
+
+    protected function hasAnyTitleInData(array $data): bool
+    {
+        return filled($data['title_uk'] ?? null)
+            || filled($data['title_en'] ?? null)
+            || filled($data['title_ru'] ?? null);
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->defaultSort('sort')
             ->reorderable('sort')
             ->columns([
-                TextColumn::make('title_uk')
+                TextColumn::make('resolved_title')
                     ->label('Назва')
-                    ->state(function (MenuItem $record): string {
-                        if (filled($record->title_uk)) {
-                            return $record->title_uk;
-                        }
-
-                        if (filled($record->title_en)) {
-                            return $record->title_en;
-                        }
-
-                        if (filled($record->title_ru)) {
-                            return $record->title_ru;
-                        }
-
-                        if ($record->type === MenuItemType::Page && $record->page) {
-                            return $record->page->title_uk
-                                ?: $record->page->title_en
-                                ?: $record->page->title_ru
-                                ?: $record->page->name;
-                        }
-
-                        return 'Без назви';
-                    })
-                    ->searchable(),
+                    ->searchable(query: function ($query, string $search) {
+                        $query->where(function ($q) use ($search) {
+                            $q->where('title_uk', 'like', "%{$search}%")
+                                ->orWhere('title_en', 'like', "%{$search}%")
+                                ->orWhere('title_ru', 'like', "%{$search}%");
+                        });
+                    }),
 
                 TextColumn::make('resolved_url')
                     ->label('Посилання')
@@ -251,16 +451,7 @@ class MenuItemsRelationManager extends RelationManager
 
                 TextColumn::make('parent_id')
                     ->label('Батьківський')
-                    ->state(function (MenuItem $record): string {
-                        if (! $record->parent) {
-                            return '—';
-                        }
-
-                        return $record->parent->title_uk
-                            ?: $record->parent->title_en
-                            ?: $record->parent->title_ru
-                            ?: ('[#' . $record->parent->id . '] Без назви');
-                    }),
+                    ->state(fn (MenuItem $record): string => $record->parent?->resolved_title ?: '—'),
 
                 IconColumn::make('target_blank')
                     ->label('New tab')
@@ -276,14 +467,17 @@ class MenuItemsRelationManager extends RelationManager
             ])
             ->headerActions([
                 CreateAction::make()
-                    ->mutateDataUsing(function (array $data): array {
-                        $data['menu_id'] = $this->getOwnerRecord()->id;
-
-                        return $data;
+                    ->using(function (array $data) {
+                        return $this->getRelationship()->create($this->prepareData($data));
                     }),
             ])
             ->recordActions([
-                EditAction::make(),
+                EditAction::make()
+                    ->using(function (MenuItem $record, array $data) {
+                        $record->update($this->prepareData($data));
+
+                        return $record;
+                    }),
                 DeleteAction::make(),
             ]);
     }

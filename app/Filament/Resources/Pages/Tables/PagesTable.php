@@ -9,6 +9,7 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ForceDeleteAction;
 use Filament\Actions\RestoreAction;
+use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -17,6 +18,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use LogicException;
 
 class PagesTable
 {
@@ -101,7 +103,19 @@ class PagesTable
                 EditAction::make(),
                 RestoreAction::make(),
                 DeleteAction::make()
-                    ->visible(fn (Page $record) => ! $record->is_system),
+                    ->visible(fn (Page $record) => ! $record->is_system)
+                    ->requiresConfirmation()
+                    ->action(function (Page $record): void {
+                        try {
+                            $record->delete();
+                        } catch (LogicException $e) {
+                            Notification::make()
+                                ->title('Сторінку не можна видалити')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
                 ForceDeleteAction::make()
                     ->visible(fn (Page $record) => ! $record->is_system),
             ]);
