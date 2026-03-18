@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Menus\Schemas;
 
 use App\Enums\MenuLocation;
 use App\Models\Menu;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -43,12 +44,14 @@ class MenuForm
                         TextInput::make('code')
                             ->label('Код')
                             ->maxLength(255)
-                            ->helperText('Можна не заповнювати — згенерується автоматично.')
+                            ->helperText('Можна не заповнювати — згенерується автоматично. Для системних меню код заблокований.')
+                            ->disabled(fn ($record) => (bool) $record?->is_system)
+                            ->dehydrated(fn ($record) => ! $record?->is_system)
                             ->dehydrateStateUsing(function ($state, callable $get, $record) {
                                 $state = trim((string) $state);
 
                                 if (filled($state)) {
-                                    return Str::slug($state);
+                                    return Menu::generateUniqueCode(Str::slug($state), $record?->getKey());
                                 }
 
                                 return Menu::generateUniqueCode(
@@ -77,6 +80,20 @@ class MenuForm
                             ->label('Активне')
                             ->default(true)
                             ->inline(false)
+                            ->columnSpan(3),
+
+                        Toggle::make('is_system')
+                            ->label('Системне меню')
+                            ->helperText('Системні меню не можна видаляти, а їхній code захищений.')
+                            ->default(false)
+                            ->inline(false)
+                            ->disabled(fn ($record) => (bool) $record?->is_system)
+                            ->dehydrated(fn ($record) => ! $record?->is_system)
+                            ->columnSpan(3),
+
+                        Placeholder::make('items_info')
+                            ->label('Пункти меню')
+                            ->content(fn ($record) => $record ? (string) $record->items()->count() : '0')
                             ->columnSpan(3),
                     ]),
                 ]),
